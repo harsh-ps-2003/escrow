@@ -1,0 +1,64 @@
+[workspace]
+members = [
+    "fedimintd",
+    "fedimint-cli",
+    "fedimint-dummy-common",
+    "fedimint-dummy-client",
+    "fedimint-dummy-server",
+    "fedimint-dummy-tests",
+    "tests",
+]
+resolver = "2"
+
+[workspace.metadata]
+authors = ["The Fedimint Developers"]
+edition = "2021"
+description = "Fedimint compiled with custom module set"
+documentation = "https://github.com/fedimint/fedimint-custom-modules-example"
+readme = "README.md"
+homepage = "https://github.com/fedimint/fedimint-custom-modules-example"
+repository = "https://github.com/fedimint/fedimint-custom-modules-example"
+license-file = "LICENSE"
+keywords = ["bitcoin", "lightning", "chaumian", "e-cash", "federated"]
+
+[workspace.dependencies]
+fedimintd = { git = "https://github.com/fedimint/fedimint", tag = "v0.3.0" }
+fedimint-cli = { git = "https://github.com/fedimint/fedimint", tag = "v0.3.0" }
+fedimint-core = { git = "https://github.com/fedimint/fedimint", tag = "v0.3.0" }
+fedimint-client = { git = "https://github.com/fedimint/fedimint", tag = "v0.3.0" }
+fedimint-logging = { git = "https://github.com/fedimint/fedimint", tag = "v0.3.0" }
+fedimint-server = { git = "https://github.com/fedimint/fedimint", tag = "v0.3.0" }
+fedimint-testing = { git = "https://github.com/fedimint/fedimint", tag = "v0.3.0" }
+devimint = { git = "https://github.com/fedimint/fedimint", tag = "v0.3.0" }
+aead = { git = "https://github.com/fedimint/fedimint", tag = "v0.3.0" }
+threshold_crypto = { git = "https://github.com/fedimint/threshold_crypto" }
+tbs = { git = "https://github.com/fedimint/fedimint", tag = "v0.3.0" }
+
+# Comment above lines and uncomment these to work with local fedimint dependencies
+# fedimintd = { path = "../fedimint/fedimintd" }
+# fedimint-cli = { path = "../fedimint/fedimint-cli" }
+# fedimint-core = { path = "../fedimint/fedimint-core" }
+# fedimint-client = { path = "../fedimint/fedimint-client" }
+# fedimint-logging = { path = "../fedimint/fedimint-logging" }
+# devimint = { path = "../fedimint/devimint" }
+
+[profile.dev]
+split-debuginfo = "packed"
+
+# in dev mode optimize crates that are perf-critical (usually just crypto crates)
+[profile.dev.package]
+secp256k1 = { opt-level = 3 }
+secp256k1-zkp = { opt-level = 3 }
+secp256k1-sys = { opt-level = 3 }
+secp256k1-zkp-sys = { opt-level = 3 }
+bitcoin_hashes = { opt-level = 3 }
+ff = { opt-level = 3 }
+group = { opt-level = 3 }
+pairing = { opt-level = 3 }
+rand_core = { opt-level = 3 }
+byteorder = { opt-level = 3 }
+zeroize = { opt-level = 3 }
+bls12_381 = { opt-level = 3 }
+subtle = { opt-level = 3 }
+ring = { opt-level = 3 }
+threshold_crypto = { opt-level = 3 }
