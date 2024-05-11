@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifies printing money via the dummy module
+# Verifies printing money via the escrow module
 
 set -euo pipefail
 export RUST_LOG="${RUST_LOG:-info}"

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, format_err, Context as _};
 use common::broken_fed_key_pair;
-use db::{migrate_to_v1, migrate_to_v2, DbKeyPrefix, DummyClientFundsKeyV1, DummyClientNameKey};
+use db::{migrate_to_v1, migrate_to_v2, DbKeyPrefix, EscrowClientFundsKeyV1, EscrowClientNameKey};
 use fedimint_client::db::ClientMigrationFn;
 use fedimint_client::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client::module::recovery::NoModuleBackup;
@@ -20,15 +20,15 @@ use fedimint_core::module::{
 };
 use fedimint_core::util::{BoxStream, NextOrPending};
 use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint};
-pub use fedimint_dummy_common as common;
-use fedimint_dummy_common::config::DummyClientConfig;
-use fedimint_dummy_common::{
-    fed_key_pair, DummyCommonInit, DummyInput, DummyModuleTypes, DummyOutput, DummyOutputOutcome,
-    KIND,
+pub use fedimint_escrow_common as common;
+use fedimint_escrow_common::config::EscrowClientConfig;
+use fedimint_escrow_common::{
+    fed_key_pair, EscrowCommonInit, EscrowInput, EscrowModuleTypes, EscrowOutput,
+    EscrowOutputOutcome, KIND,
 };
 use futures::{pin_mut, FutureExt, StreamExt};
 use secp256k1::{PublicKey, Secp256k1};
-use states::DummyStateMachine;
+use states::EscrowStateMachine;
 use strum::IntoEnumIterator;
 
 pub mod api;
@@ -36,34 +36,34 @@ pub mod db;
 pub mod states;
 
 #[derive(Debug)]
-pub struct DummyClientModule {
-    cfg: DummyClientConfig,
+pub struct EscrowClientModule {
+    cfg: EscrowClientConfig,
     key: KeyPair,
-    notifier: ModuleNotifier<DummyStateMachine>,
+    notifier: ModuleNotifier<EscrowStateMachine>,
     client_ctx: ClientContext<Self>,
     db: Database,
 }
 
 /// Data needed by the state machine
 #[derive(Debug, Clone)]
-pub struct DummyClientContext {
-    pub dummy_decoder: Decoder,
+pub struct EscrowClientContext {
+    pub escrow_decoder: Decoder,
 }
 
 // TODO: Boiler-plate
-impl Context for DummyClientContext {}
+impl Context for EscrowClientContext {}
 
 #[apply(async_trait_maybe_send!)]
-impl ClientModule for DummyClientModule {
-    type Init = DummyClientInit;
-    type Common = DummyModuleTypes;
+impl ClientModule for EscrowClientModule {
+    type Init = EscrowClientInit;
+    type Common = EscrowModuleTypes;
     type Backup = NoModuleBackup;
-    type ModuleStateMachineContext = DummyClientContext;
-    type States = DummyStateMachine;
+    type ModuleStateMachineContext = EscrowClientContext;
+    type States = EscrowStateMachine;
 
     fn context(&self) -> Self::ModuleStateMachineContext {
-        DummyClientContext {
-            dummy_decoder: self.decoder(),
+        EscrowClientContext {
+            escrow_decoder: self.decoder(),
         }
     }
 
@@ -105,17 +105,17 @@ impl ClientModule for DummyClientModule {
             return Err(format_err!("Insufficient funds"));
         }
         let updated = funds - amount;
-        dbtx.insert_entry(&DummyClientFundsKeyV1, &updated).await;
+        dbtx.insert_entry(&EscrowClientFundsKeyV1, &updated).await;
 
         // Construct input and state machine to track the tx
         Ok(vec![ClientInput {
-            input: DummyInput {
+            input: EscrowInput {
                 amount,
                 account: self.key.public_key(),
             },
             keys: vec![self.key],
             state_machines: Arc::new(move |txid, _| {
-                vec![DummyStateMachine::Input(amount, txid, id)]
+                vec![EscrowStateMachine::Input(amount, txid, id)]
             }),
         }])
     }
@@ -128,12 +128,12 @@ impl ClientModule for DummyClientModule {
     ) -> Vec<ClientOutput<<Self::Common as ModuleCommon>::Output, Self::States>> {
         // Construct output and state machine to track the tx
         vec![ClientOutput {
-            output: DummyOutput {
+            output: EscrowOutput {
                 amount,
                 account: self.key.public_key(),
             },
             state_machines: Arc::new(move |txid, _| {
-                vec![DummyStateMachine::Output(amount, txid, id)]
+                vec![EscrowStateMachine::Output(amount, txid, id)]
             }),
         }]
     }
@@ -149,9 +149,9 @@ impl ClientModule for DummyClientModule {
             .await
             .filter_map(|state| async move {
                 match state {
-                    DummyStateMachine::OutputDone(amount, _) => Some(Ok(amount)),
-                    DummyStateMachine::Refund(_) => Some(Err(anyhow::anyhow!(
-                        "Error occurred processing the dummy transaction"
+                    EscrowStateMachine::OutputDone(amount, _) => Some(Ok(amount)),
+                    EscrowStateMachine::Refund(_) => Some(Err(anyhow::anyhow!(
+                        "Error occurred processing the Escrow transaction"
                     ))),
                     _ => None,
                 }
@@ -173,9 +173,9 @@ impl ClientModule for DummyClientModule {
                 .await
                 .filter_map(|state| async move {
                     match state {
-                        DummyStateMachine::OutputDone(_, _) => Some(()),
-                        DummyStateMachine::Input { .. } => Some(()),
-                        DummyStateMachine::Refund(_) => Some(()),
+                        EscrowStateMachine::OutputDone(_, _) => Some(()),
+                        EscrowStateMachine::Input { .. } => Some(()),
+                        EscrowStateMachine::Refund(_) => Some(()),
                         _ => None,
                     }
                 }),
@@ -183,7 +183,7 @@ impl ClientModule for DummyClientModule {
     }
 }
 
-impl DummyClientModule {
+impl EscrowClientModule {
     pub async fn print_using_account(
         &self,
         amount: Amount,
@@ -194,12 +194,12 @@ impl DummyClientModule {
         // TODO: Building a tx could be easier
         // Create input using the fed's account
         let input = ClientInput {
-            input: DummyInput {
+            input: EscrowInput {
                 amount,
                 account: account_kp.public_key(),
             },
             keys: vec![account_kp],
-            state_machines: Arc::new(move |_, _| Vec::<DummyStateMachine>::new()),
+            state_machines: Arc::new(move |_, _| Vec::<EscrowStateMachine>::new()),
         };
 
         // Build and send tx to the fed
@@ -257,8 +257,8 @@ impl DummyClientModule {
 
         // Create output using another account
         let output = ClientOutput {
-            output: DummyOutput { amount, account },
-            state_machines: Arc::new(move |_, _| Vec::<DummyStateMachine>::new()),
+            output: EscrowOutput { amount, account },
+            state_machines: Arc::new(move |_, _| Vec::<EscrowStateMachine>::new()),
         };
 
         // Build and send tx to the fed
@@ -269,7 +269,7 @@ impl DummyClientModule {
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
         let (txid, _) = self
             .client_ctx
-            .finalize_and_submit_transaction(op_id, DummyCommonInit::KIND.as_str(), outpoint, tx)
+            .finalize_and_submit_transaction(op_id, EscrowCommonInit::KIND.as_str(), outpoint, tx)
             .await?;
 
         let tx_subscription = self.client_ctx.transaction_updates(op_id).await;
@@ -285,7 +285,7 @@ impl DummyClientModule {
     /// Wait to receive money at an outpoint
     pub async fn receive_money(&self, outpoint: OutPoint) -> anyhow::Result<()> {
         let mut dbtx = self.db.begin_transaction().await;
-        let DummyOutputOutcome(new_balance, account) = self
+        let EscrowOutputOutcome(new_balance, account) = self
             .client_ctx
             .global_api()
             .await_output_outcome(outpoint, Duration::from_secs(10), &self.decoder())
@@ -295,7 +295,7 @@ impl DummyClientModule {
             return Err(format_err!("Wrong account id"));
         }
 
-        dbtx.insert_entry(&DummyClientFundsKeyV1, &new_balance)
+        dbtx.insert_entry(&EscrowClientFundsKeyV1, &new_balance)
             .await;
         dbtx.commit_tx().await;
         Ok(())
@@ -308,17 +308,17 @@ impl DummyClientModule {
 }
 
 async fn get_funds(dbtx: &mut DatabaseTransaction<'_>) -> Amount {
-    let funds = dbtx.get_value(&DummyClientFundsKeyV1).await;
+    let funds = dbtx.get_value(&EscrowClientFundsKeyV1).await;
     funds.unwrap_or(Amount::ZERO)
 }
 
 #[derive(Debug, Clone)]
-pub struct DummyClientInit;
+pub struct EscrowClientInit;
 
 // TODO: Boilerplate-code
 #[apply(async_trait_maybe_send!)]
-impl ModuleInit for DummyClientInit {
-    type Common = DummyCommonInit;
+impl ModuleInit for EscrowClientInit {
+    type Common = EscrowCommonInit;
     const DATABASE_VERSION: DatabaseVersion = DatabaseVersion(2);
 
     async fn dump_database(
@@ -334,13 +334,13 @@ impl ModuleInit for DummyClientInit {
         for table in filtered_prefixes {
             match table {
                 DbKeyPrefix::ClientFunds => {
-                    if let Some(funds) = dbtx.get_value(&DummyClientFundsKeyV1).await {
-                        items.insert("Dummy Funds".to_string(), Box::new(funds));
+                    if let Some(funds) = dbtx.get_value(&EscrowClientFundsKeyV1).await {
+                        items.insert("escrow Funds".to_string(), Box::new(funds));
                     }
                 }
                 DbKeyPrefix::ClientName => {
-                    if let Some(name) = dbtx.get_value(&DummyClientNameKey).await {
-                        items.insert("Dummy Name".to_string(), Box::new(name));
+                    if let Some(name) = dbtx.get_value(&EscrowClientNameKey).await {
+                        items.insert("escrow Name".to_string(), Box::new(name));
                     }
                 }
             }
@@ -351,8 +351,8 @@ impl ModuleInit for DummyClientInit {
 
 /// Generates the client module
 #[apply(async_trait_maybe_send!)]
-impl ClientModuleInit for DummyClientInit {
-    type Module = DummyClientModule;
+impl ClientModuleInit for EscrowClientInit {
+    type Module = EscrowClientModule;
 
     fn supported_api_versions(&self) -> MultiApiVersion {
         MultiApiVersion::try_from_iter([ApiVersion { major: 0, minor: 0 }])
@@ -360,7 +360,7 @@ impl ClientModuleInit for DummyClientInit {
     }
 
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
-        Ok(DummyClientModule {
+        Ok(EscrowClientModule {
             cfg: args.cfg().clone(),
             key: args
                 .module_root_secret()

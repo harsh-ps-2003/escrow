@@ -10,11 +10,11 @@ name = "fedimintd"
 path = "src/fedimintd.rs"
 
 [dependencies]
-anyhow = "1.0.66"
+anyhow = { workspace = true }
 fedimintd = { workspace = true }
 tokio = { version = "1.25.0", features = ["full", "tracing"] }
-fedimint-dummy-server = { path = "../fedimint-dummy-server" }
-fedimint-dummy-common = { path = "../fedimint-dummy-common" }
+fedimint-escrow-server = { path = "../fedimint-escrow-server" }
+fedimint-escrow-common = { path = "../fedimint-escrow-common" }
 fedimint-core = { workspace = true }
 
 [build-dependencies]

@@ -17,13 +17,13 @@ use fedimint_core::module::{
 };
 use fedimint_core::server::DynServerModule;
 use fedimint_core::{push_db_pair_items, Amount, OutPoint, PeerId, ServerModule};
-use fedimint_dummy_common::config::{
-    DummyClientConfig, DummyConfig, DummyConfigConsensus, DummyConfigLocal, DummyConfigPrivate,
-    DummyGenParams,
+use fedimint_escrow_common::config::{
+    EscrowClientConfig, EscrowConfig, EscrowConfigConsensus, EscrowConfigLocal,
+    EscrowConfigPrivate, EscrowGenParams,
 };
-use fedimint_dummy_common::{
-    broken_fed_public_key, fed_public_key, DummyCommonInit, DummyConsensusItem, DummyInput,
-    DummyInputError, DummyModuleTypes, DummyOutput, DummyOutputError, DummyOutputOutcome,
+use fedimint_escrow_common::{
+    broken_fed_public_key, fed_public_key, EscrowCommonInit, EscrowConsensusItem, EscrowInput,
+    EscrowInputError, EscrowModuleTypes, EscrowOutput, EscrowOutputError, EscrowOutputOutcome,
     CONSENSUS_VERSION,
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
@@ -31,19 +31,19 @@ use futures::{FutureExt, StreamExt};
 use strum::IntoEnumIterator;
 
 use crate::db::{
-    migrate_to_v1, DbKeyPrefix, DummyFundsKeyV1, DummyFundsPrefixV1, DummyOutcomeKey,
-    DummyOutcomePrefix,
+    migrate_to_v1, DbKeyPrefix, EscrowFundsKeyV1, EscrowFundsPrefixV1, EscrowOutcomeKey,
+    EscrowOutcomePrefix,
 };
 
 pub mod db;
 /// Generates the module
 #[derive(Debug, Clone)]
-pub struct DummyInit;
+pub struct EscrowInit;
 
 // TODO: Boilerplate-code
 #[async_trait]
-impl ModuleInit for DummyInit {
-    type Common = DummyCommonInit;
+impl ModuleInit for EscrowInit {
+    type Common = EscrowCommonInit;
     const DATABASE_VERSION: DatabaseVersion = DatabaseVersion(1);
 
     /// Dumps all database items for debugging
@@ -63,21 +63,21 @@ impl ModuleInit for DummyInit {
                 DbKeyPrefix::Funds => {
                     push_db_pair_items!(
                         dbtx,
-                        DummyFundsPrefixV1,
-                        DummyFundsKeyV1,
+                        EscrowFundsPrefixV1,
+                        EscrowFundsKeyV1,
                         Amount,
                         items,
-                        "Dummy Funds"
+                        "Escrow Funds"
                     );
                 }
                 DbKeyPrefix::Outcome => {
                     push_db_pair_items!(
                         dbtx,
-                        DummyOutcomePrefix,
-                        DummyOutcomeKey,
-                        DummyOutputOutcome,
+                        EscrowOutcomePrefix,
+                        EscrowOutcomeKey,
+                        EscrowOutputOutcome,
                         items,
-                        "Dummy Outputs"
+                        "Escrow Outputs"
                     );
                 }
             }
@@ -89,8 +89,8 @@ impl ModuleInit for DummyInit {
 
 /// Implementation of server module non-consensus functions
 #[async_trait]
-impl ServerModuleInit for DummyInit {
-    type Params = DummyGenParams;
+impl ServerModuleInit for EscrowInit {
+    type Params = EscrowGenParams;
 
     /// Returns the version of this module
     fn versions(&self, _core: CoreConsensusVersion) -> &[ModuleConsensusVersion] {
@@ -107,7 +107,7 @@ impl ServerModuleInit for DummyInit {
 
     /// Initialize the module
     async fn init(&self, args: &ServerModuleInitArgs<Self>) -> anyhow::Result<DynServerModule> {
-        Ok(Dummy::new(args.cfg().to_typed()?).into())
+        Ok(Escrow::new(args.cfg().to_typed()?).into())
     }
 
     /// DB migrations to move from old to newer versions
@@ -128,10 +128,10 @@ impl ServerModuleInit for DummyInit {
         peers
             .iter()
             .map(|&peer| {
-                let config = DummyConfig {
-                    local: DummyConfigLocal {},
-                    private: DummyConfigPrivate,
-                    consensus: DummyConfigConsensus {
+                let config = EscrowConfig {
+                    local: EscrowConfigLocal {},
+                    private: EscrowConfigPrivate,
+                    consensus: EscrowConfigConsensus {
                         tx_fee: params.consensus.tx_fee,
                     },
                 };
@@ -148,10 +148,10 @@ impl ServerModuleInit for DummyInit {
     ) -> DkgResult<ServerModuleConfig> {
         let params = self.parse_params(params).unwrap();
 
-        Ok(DummyConfig {
-            local: DummyConfigLocal {},
-            private: DummyConfigPrivate,
-            consensus: DummyConfigConsensus {
+        Ok(EscrowConfig {
+            local: EscrowConfigLocal {},
+            private: EscrowConfigPrivate,
+            consensus: EscrowConfigConsensus {
                 tx_fee: params.consensus.tx_fee,
             },
         }
@@ -162,9 +162,9 @@ impl ServerModuleInit for DummyInit {
     fn get_client_config(
         &self,
         config: &ServerModuleConsensusConfig,
-    ) -> anyhow::Result<DummyClientConfig> {
-        let config = DummyConfigConsensus::from_erased(config)?;
-        Ok(DummyClientConfig {
+    ) -> anyhow::Result<EscrowClientConfig> {
+        let config = EscrowConfigConsensus::from_erased(config)?;
+        Ok(EscrowClientConfig {
             tx_fee: config.tx_fee,
         })
     }
@@ -178,42 +178,42 @@ impl ServerModuleInit for DummyInit {
     }
 }
 
-/// Dummy module
+/// escrow module
 #[derive(Debug)]
-pub struct Dummy {
-    pub cfg: DummyConfig,
+pub struct Escrow {
+    pub cfg: EscrowConfig,
 }
 
 /// Implementation of consensus for the server module
 #[async_trait]
-impl ServerModule for Dummy {
+impl ServerModule for Escrow {
     /// Define the consensus types
-    type Common = DummyModuleTypes;
-    type Init = DummyInit;
+    type Common = EscrowModuleTypes;
+    type Init = EscrowInit;
 
     async fn consensus_proposal(
         &self,
         _dbtx: &mut DatabaseTransaction<'_>,
-    ) -> Vec<DummyConsensusItem> {
+    ) -> Vec<EscrowConsensusItem> {
         Vec::new()
     }
 
     async fn process_consensus_item<'a, 'b>(
         &'a self,
         _dbtx: &mut DatabaseTransaction<'b>,
-        _consensus_item: DummyConsensusItem,
+        _consensus_item: EscrowConsensusItem,
         _peer_id: PeerId,
     ) -> anyhow::Result<()> {
-        bail!("The dummy module does not use consensus items");
+        bail!("The escrow module does not use consensus items");
     }
 
     async fn process_input<'a, 'b, 'c>(
         &'a self,
         dbtx: &mut DatabaseTransaction<'c>,
-        input: &'b DummyInput,
-    ) -> Result<InputMeta, DummyInputError> {
+        input: &'b EscrowInput,
+    ) -> Result<InputMeta, EscrowInputError> {
         let current_funds = dbtx
-            .get_value(&DummyFundsKeyV1(input.account))
+            .get_value(&EscrowFundsKeyV1(input.account))
             .await
             .unwrap_or(Amount::ZERO);
 
@@ -222,7 +222,7 @@ impl ServerModule for Dummy {
             && fed_public_key() != input.account
             && broken_fed_public_key() != input.account
         {
-            return Err(DummyInputError::NotEnoughFunds);
+            return Err(EscrowInputError::NotEnoughFunds);
         }
 
         // Subtract funds from normal user, or print funds for the fed
@@ -235,7 +235,7 @@ impl ServerModule for Dummy {
             current_funds - input.amount
         };
 
-        dbtx.insert_entry(&DummyFundsKeyV1(input.account), &updated_funds)
+        dbtx.insert_entry(&EscrowFundsKeyV1(input.account), &updated_funds)
             .await;
 
         Ok(InputMeta {
@@ -251,18 +251,18 @@ impl ServerModule for Dummy {
     async fn process_output<'a, 'b>(
         &'a self,
         dbtx: &mut DatabaseTransaction<'b>,
-        output: &'a DummyOutput,
+        output: &'a EscrowOutput,
         out_point: OutPoint,
-    ) -> Result<TransactionItemAmount, DummyOutputError> {
+    ) -> Result<TransactionItemAmount, EscrowOutputError> {
         // Add output funds to the user's account
-        let current_funds = dbtx.get_value(&DummyFundsKeyV1(output.account)).await;
+        let current_funds = dbtx.get_value(&EscrowFundsKeyV1(output.account)).await;
         let updated_funds = current_funds.unwrap_or(Amount::ZERO) + output.amount;
-        dbtx.insert_entry(&DummyFundsKeyV1(output.account), &updated_funds)
+        dbtx.insert_entry(&EscrowFundsKeyV1(output.account), &updated_funds)
             .await;
 
         // Update the output outcome the user can query
-        let outcome = DummyOutputOutcome(updated_funds, output.account);
-        dbtx.insert_entry(&DummyOutcomeKey(out_point), &outcome)
+        let outcome = EscrowOutputOutcome(updated_funds, output.account);
+        dbtx.insert_entry(&EscrowOutcomeKey(out_point), &outcome)
             .await;
 
         Ok(TransactionItemAmount {
@@ -275,9 +275,9 @@ impl ServerModule for Dummy {
         &self,
         dbtx: &mut DatabaseTransaction<'_>,
         out_point: OutPoint,
-    ) -> Option<DummyOutputOutcome> {
+    ) -> Option<EscrowOutputOutcome> {
         // check whether or not the output has been processed
-        dbtx.get_value(&DummyOutcomeKey(out_point)).await
+        dbtx.get_value(&EscrowOutcomeKey(out_point)).await
     }
 
     async fn audit(
@@ -290,17 +290,17 @@ impl ServerModule for Dummy {
             .add_items(
                 dbtx,
                 module_instance_id,
-                &DummyFundsPrefixV1,
+                &EscrowFundsPrefixV1,
                 |k, v| match k {
                     // the fed's test account is considered an asset (positive)
                     // should be the bitcoin we own in a real module
-                    DummyFundsKeyV1(key)
+                    EscrowFundsKeyV1(key)
                         if key == fed_public_key() || key == broken_fed_public_key() =>
                     {
                         v.msats as i64
                     }
                     // a user's funds are a federation's liability (negative)
-                    DummyFundsKeyV1(_) => -(v.msats as i64),
+                    EscrowFundsKeyV1(_) => -(v.msats as i64),
                 },
             )
             .await;
@@ -311,9 +311,9 @@ impl ServerModule for Dummy {
     }
 }
 
-impl Dummy {
+impl Escrow {
     /// Create new module instance
-    pub fn new(cfg: DummyConfig) -> Dummy {
-        Dummy { cfg }
+    pub fn new(cfg: EscrowConfig) -> Escrow {
+        Escrow { cfg }
     }
 }

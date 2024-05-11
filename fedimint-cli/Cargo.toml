@@ -10,9 +10,9 @@ name = "fedimint-cli"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1.0.66"
+anyhow = { workspace = true }
 fedimint-cli = { workspace = true }
-fedimint-dummy-client = { path = "../fedimint-dummy-client" }
+fedimint-escrow-client = { path = "../fedimint-escrow-client" }
 fedimint-core = { workspace = true }
 tokio = { version = "1.25.0", features = ["full", "tracing"] }
 

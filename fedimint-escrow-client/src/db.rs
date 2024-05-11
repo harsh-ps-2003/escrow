@@ -7,7 +7,7 @@ use fedimint_core::{impl_db_record, Amount};
 use strum_macros::EnumIter;
 use tracing::warn;
 
-use crate::states::DummyStateMachine;
+use crate::states::EscrowStateMachine;
 
 #[repr(u8)]
 #[derive(Clone, Debug, EnumIter)]
@@ -25,46 +25,46 @@ impl std::fmt::Display for DbKeyPrefix {
 }
 
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash)]
-pub struct DummyClientFundsKeyV0;
+pub struct EscrowClientFundsKeyV0;
 
 impl_db_record!(
-    key = DummyClientFundsKeyV0,
+    key = EscrowClientFundsKeyV0,
     value = (),
     db_prefix = DbKeyPrefix::ClientFunds,
 );
 
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash)]
-pub struct DummyClientFundsKeyV1;
+pub struct EscrowClientFundsKeyV1;
 
 impl_db_record!(
-    key = DummyClientFundsKeyV1,
+    key = EscrowClientFundsKeyV1,
     value = Amount,
     db_prefix = DbKeyPrefix::ClientFunds,
 );
 
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash)]
-pub struct DummyClientNameKey;
+pub struct EscrowClientNameKey;
 
 impl_db_record!(
-    key = DummyClientNameKey,
+    key = EscrowClientNameKey,
     value = String,
     db_prefix = DbKeyPrefix::ClientName,
 );
 
 /// Migrates the database from version 0 to version 1 by
-/// removing `DummyClientFundsKeyV0` and inserting `DummyClientFundsKeyV1`.
+/// removing `EscrowClientFundsKeyV0` and inserting `EscrowClientFundsKeyV1`.
 /// The new key/value pair has an `Amount` as the value.
 pub async fn migrate_to_v1(
     dbtx: &mut DatabaseTransaction<'_>,
 ) -> anyhow::Result<Option<(Vec<DynState>, Vec<DynState>)>> {
-    if dbtx.remove_entry(&DummyClientFundsKeyV0).await.is_some() {
-        // Since this is a dummy migration, we can insert any value for the client
+    if dbtx.remove_entry(&EscrowClientFundsKeyV0).await.is_some() {
+        // Since this is a escrow migration, we can insert any value for the client
         // funds. Real modules should handle the funds properly.
 
-        dbtx.insert_new_entry(&DummyClientFundsKeyV1, &Amount::from_sats(1000))
+        dbtx.insert_new_entry(&EscrowClientFundsKeyV1, &Amount::from_sats(1000))
             .await;
     } else {
-        warn!("Dummy client did not have client funds, skipping database migration");
+        warn!("escrow client did not have client funds, skipping database migration");
     }
 
     Ok(None)
@@ -84,20 +84,23 @@ pub async fn migrate_to_v2(
         let dynstate = DynState::from_bytes(active_state.as_slice(), &decoders)?;
         let typed_state = dynstate
             .as_any()
-            .downcast_ref::<DummyStateMachine>()
+            .downcast_ref::<EscrowStateMachine>()
             .expect("Unexpected DynState suppilied to migration function");
 
         match typed_state {
-            DummyStateMachine::Unreachable(_, _) => {
+            EscrowStateMachine::Unreachable(_, _) => {
                 // Try to parse the bytes as the `Unreachable` struct to simulate a deleted
                 // state. In a real migration, `DynState::from_bytes` will
-                // fail since `DummyStateMachine::Unreachable` will not exist.
+                // fail since `EscrowStateMachine::Unreachable` will not exist.
                 if let Ok(unreachable) =
                     Unreachable::consensus_decode_vec(active_state.clone(), &decoders)
                 {
                     new_active_states.push(
-                        DummyStateMachine::OutputDone(unreachable.amount, unreachable.operation_id)
-                            .into_dyn(module_instance_id),
+                        EscrowStateMachine::OutputDone(
+                            unreachable.amount,
+                            unreachable.operation_id,
+                        )
+                        .into_dyn(module_instance_id),
                     );
                 }
             }
@@ -111,20 +114,23 @@ pub async fn migrate_to_v2(
         let dynstate = DynState::from_bytes(inactive_state.as_slice(), &decoders)?;
         let typed_state = dynstate
             .as_any()
-            .downcast_ref::<DummyStateMachine>()
+            .downcast_ref::<EscrowStateMachine>()
             .expect("Unexpected DynState suppilied to migration function");
 
         match typed_state {
-            DummyStateMachine::Unreachable(_, _) => {
+            EscrowStateMachine::Unreachable(_, _) => {
                 // Try to parse the bytes as the `Unreachable` struct to simulate a deleted
                 // state. In a real migration, `DynState::from_bytes` will
-                // fail since `DummyStateMachine::Unreachable` will not exist.
+                // fail since `EscrowStateMachine::Unreachable` will not exist.
                 if let Ok(unreachable) =
                     Unreachable::consensus_decode_vec(inactive_state.clone(), &decoders)
                 {
                     new_inactive_states.push(
-                        DummyStateMachine::OutputDone(unreachable.amount, unreachable.operation_id)
-                            .into_dyn(module_instance_id),
+                        EscrowStateMachine::OutputDone(
+                            unreachable.amount,
+                            unreachable.operation_id,
+                        )
+                        .into_dyn(module_instance_id),
                     );
                 }
             }

@@ -7,16 +7,16 @@ use fedimint_core::core::{IntoDynInstance, ModuleKind, OperationId};
 use fedimint_core::db::mem_impl::MemDatabase;
 use fedimint_core::module::ModuleConsensusVersion;
 use fedimint_core::{sats, Amount, OutPoint};
-use fedimint_dummy_client::states::DummyStateMachine;
-use fedimint_dummy_client::{DummyClientInit, DummyClientModule};
-use fedimint_dummy_common::config::{DummyClientConfig, DummyGenParams};
-use fedimint_dummy_common::{broken_fed_key_pair, DummyInput, DummyOutput, KIND};
-use fedimint_dummy_server::DummyInit;
+use fedimint_escrow_client::states::EscrowStateMachine;
+use fedimint_escrow_client::{EscrowClientInit, EscrowClientModule};
+use fedimint_escrow_common::config::{EscrowClientConfig, EscrowGenParams};
+use fedimint_escrow_common::{broken_fed_key_pair, EscrowInput, EscrowOutput, KIND};
+use fedimint_escrow_server::EscrowInit;
 use fedimint_testing::fixtures::Fixtures;
 use secp256k1::Secp256k1;
 
 fn fixtures() -> Fixtures {
-    Fixtures::new_primary(DummyClientInit, DummyInit, DummyGenParams::default())
+    Fixtures::new_primary(EscrowClientInit, EscrowInit, EscrowGenParams::default())
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -24,16 +24,16 @@ async fn can_print_and_send_money() -> anyhow::Result<()> {
     let fed = fixtures().new_fed().await;
     let (client1, client2) = fed.two_clients().await;
 
-    let client1_dummy_module = client1.get_first_module::<DummyClientModule>();
-    let client2_dummy_module = client2.get_first_module::<DummyClientModule>();
-    let (_, outpoint) = client1_dummy_module.print_money(sats(1000)).await?;
-    client1_dummy_module.receive_money(outpoint).await?;
+    let client1_escrow_module = client1.get_first_module::<EscrowClientModule>();
+    let client2_escrow_module = client2.get_first_module::<EscrowClientModule>();
+    let (_, outpoint) = client1_escrow_module.print_money(sats(1000)).await?;
+    client1_escrow_module.receive_money(outpoint).await?;
     assert_eq!(client1.get_balance().await, sats(1000));
 
-    let outpoint = client1_dummy_module
-        .send_money(client2_dummy_module.account(), sats(250))
+    let outpoint = client1_escrow_module
+        .send_money(client2_escrow_module.account(), sats(250))
         .await?;
-    client2_dummy_module.receive_money(outpoint).await?;
+    client2_escrow_module.receive_money(outpoint).await?;
     assert_eq!(client1.get_balance().await, sats(750));
     assert_eq!(client2.get_balance().await, sats(250));
     Ok(())
@@ -50,7 +50,7 @@ async fn client_ignores_unknown_module() {
         module_id,
         ModuleKind::from_static_str("unknown_module"),
         ModuleConsensusVersion::new(0, 0),
-        DummyClientConfig {
+        EscrowClientConfig {
             tx_fee: Amount::from_sats(1),
         },
     )
@@ -82,19 +82,19 @@ async fn federation_should_abort_if_balance_sheet_is_negative() -> anyhow::Resul
         prev_panic_hook(info);
     }));
 
-    let dummy = client.get_first_module::<DummyClientModule>();
+    let Escrow = client.get_first_module::<EscrowClientModule>();
     let op_id = OperationId(rand::random());
     let account_kp = broken_fed_key_pair();
     let input = ClientInput {
-        input: DummyInput {
+        input: EscrowInput {
             amount: sats(1000),
             account: account_kp.public_key(),
         },
         keys: vec![account_kp],
-        state_machines: Arc::new(move |_, _| Vec::<DummyStateMachine>::new()),
+        state_machines: Arc::new(move |_, _| Vec::<EscrowStateMachine>::new()),
     };
 
-    let tx = TransactionBuilder::new().with_input(input.into_dyn(dummy.id));
+    let tx = TransactionBuilder::new().with_input(input.into_dyn(Escrow.id));
     let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
     client
         .finalize_and_submit_transaction(op_id, KIND.as_str(), outpoint, tx)
@@ -115,15 +115,15 @@ async fn unbalanced_transactions_get_rejected() -> anyhow::Result<()> {
     let fed = fixtures().new_fed().await;
     let client = fed.new_client().await;
 
-    let dummy_module = client.get_first_module::<DummyClientModule>();
+    let escrow_module = client.get_first_module::<EscrowClientModule>();
     let output = ClientOutput {
-        output: DummyOutput {
+        output: EscrowOutput {
             amount: sats(1000),
-            account: dummy_module.account(),
+            account: escrow_module.account(),
         },
-        state_machines: Arc::new(move |_, _| Vec::<DummyStateMachine>::new()),
+        state_machines: Arc::new(move |_, _| Vec::<EscrowStateMachine>::new()),
     };
-    let tx = TransactionBuilder::new().with_output(output.into_dyn(dummy_module.id));
+    let tx = TransactionBuilder::new().with_output(output.into_dyn(escrow_module.id));
     let (tx, _) = tx.build(&Secp256k1::new(), rand::thread_rng());
     let result = client.api().submit_transaction(tx).await;
     match result {

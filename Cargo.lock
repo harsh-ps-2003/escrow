@@ -421,7 +421,7 @@ dependencies = [
  "bitflags 2.4.0",
  "cexpr",
  "clang-sys",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "proc-macro2",
@@ -480,6 +480,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitcoin-io"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "340e09e8399c7bd8912f495af6aa58bea0c9214773417ffaa8f6460f93aaee56"
+
+[[package]]
 name = "bitcoin-private"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -503,6 +509,16 @@ checksum = "5d7066118b13d4b20b23645932dfb3a81ce7e29f95726c2036fa33cd7b092501"
 dependencies = [
  "bitcoin-private",
  "serde",
+]
+
+[[package]]
+name = "bitcoin_hashes"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb18c03d0db0247e147a21a6faafd5a7eb851c743db062de72018b6b7e8e4d16"
+dependencies = [
+ "bitcoin-io",
+ "hex-conservative",
 ]
 
 [[package]]
@@ -1329,7 +1345,7 @@ dependencies = [
  "fedimint-build 0.4.0-alpha",
  "fedimint-cli",
  "fedimint-core",
- "fedimint-dummy-client 0.3.0",
+ "fedimint-escrow-client",
  "tokio",
 ]
 
@@ -1462,6 +1478,49 @@ dependencies = [
 [[package]]
 name = "fedimint-dummy-client"
 version = "0.3.0"
+source = "git+https://github.com/fedimint/fedimint?tag=v0.3.0#a41e3a7e31ce0f26058206a04f1cd49ef2b12fe3"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "erased-serde",
+ "fedimint-client",
+ "fedimint-core",
+ "fedimint-dummy-common",
+ "fedimint-threshold-crypto",
+ "futures",
+ "rand",
+ "secp256k1 0.24.3",
+ "serde",
+ "strum 0.26.2",
+ "strum_macros 0.26.2",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "fedimint-dummy-common"
+version = "0.3.0"
+source = "git+https://github.com/fedimint/fedimint?tag=v0.3.0#a41e3a7e31ce0f26058206a04f1cd49ef2b12fe3"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitcoin_hashes 0.11.0",
+ "erased-serde",
+ "fedimint-core",
+ "fedimint-threshold-crypto",
+ "futures",
+ "rand",
+ "secp256k1 0.24.3",
+ "serde",
+ "strum 0.26.2",
+ "strum_macros 0.26.2",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "fedimint-escrow-client"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1469,30 +1528,7 @@ dependencies = [
  "fedimint-build 0.4.0-alpha",
  "fedimint-client",
  "fedimint-core",
- "fedimint-dummy-common 0.3.0",
- "futures",
- "rand",
- "secp256k1 0.24.3",
- "serde",
- "strum 0.24.1",
- "strum_macros 0.24.3",
- "thiserror",
- "threshold_crypto",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-dummy-client"
-version = "0.3.0"
-source = "git+https://github.com/fedimint/fedimint?tag=v0.3.0#a41e3a7e31ce0f26058206a04f1cd49ef2b12fe3"
-dependencies = [
- "anyhow",
- "async-trait",
- "erased-serde",
- "fedimint-client",
- "fedimint-core",
- "fedimint-dummy-common 0.3.0 (git+https://github.com/fedimint/fedimint?tag=v0.3.0)",
- "fedimint-threshold-crypto",
+ "fedimint-escrow-common",
  "futures",
  "rand",
  "secp256k1 0.24.3",
@@ -1500,40 +1536,19 @@ dependencies = [
  "strum 0.26.2",
  "strum_macros 0.26.2",
  "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "fedimint-dummy-common"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitcoin_hashes 0.11.0",
- "erased-serde",
- "fedimint-core",
- "futures",
- "rand",
- "secp256k1 0.24.3",
- "serde",
- "strum 0.24.1",
- "strum_macros 0.24.3",
- "thiserror",
  "threshold_crypto",
  "tracing",
 ]
 
 [[package]]
-name = "fedimint-dummy-common"
+name = "fedimint-escrow-common"
 version = "0.3.0"
-source = "git+https://github.com/fedimint/fedimint?tag=v0.3.0#a41e3a7e31ce0f26058206a04f1cd49ef2b12fe3"
 dependencies = [
  "anyhow",
  "async-trait",
- "bitcoin_hashes 0.11.0",
+ "bitcoin_hashes 0.14.0",
  "erased-serde",
  "fedimint-core",
- "fedimint-threshold-crypto",
  "futures",
  "rand",
  "secp256k1 0.24.3",
@@ -1541,41 +1556,42 @@ dependencies = [
  "strum 0.26.2",
  "strum_macros 0.26.2",
  "thiserror",
+ "threshold_crypto",
  "tracing",
 ]
 
 [[package]]
-name = "fedimint-dummy-server"
+name = "fedimint-escrow-server"
 version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bitcoin_hashes 0.11.0",
+ "bitcoin_hashes 0.14.0",
  "erased-serde",
  "fedimint-core",
- "fedimint-dummy-common 0.3.0",
+ "fedimint-escrow-common",
  "fedimint-server",
  "futures",
  "rand",
  "secp256k1 0.24.3",
  "serde",
- "strum 0.24.1",
- "strum_macros 0.24.3",
+ "strum 0.26.2",
+ "strum_macros 0.26.2",
  "thiserror",
  "tokio",
  "tracing",
 ]
 
 [[package]]
-name = "fedimint-dummy-tests"
+name = "fedimint-escrow-tests"
 version = "0.2.1"
 dependencies = [
  "anyhow",
  "fedimint-client",
  "fedimint-core",
- "fedimint-dummy-client 0.3.0",
- "fedimint-dummy-common 0.3.0",
- "fedimint-dummy-server",
+ "fedimint-escrow-client",
+ "fedimint-escrow-common",
+ "fedimint-escrow-server",
  "fedimint-logging",
  "fedimint-server",
  "fedimint-testing",
@@ -1678,7 +1694,7 @@ dependencies = [
  "fedimint-client",
  "fedimint-cln-rpc",
  "fedimint-core",
- "fedimint-dummy-client 0.3.0 (git+https://github.com/fedimint/fedimint?tag=v0.3.0)",
+ "fedimint-dummy-client",
  "fedimint-ln-client",
  "fedimint-ln-common",
  "fedimint-logging",
@@ -2013,7 +2029,7 @@ dependencies = [
  "devimint",
  "fedimint-cli",
  "fedimint-core",
- "fedimint-dummy-client 0.3.0",
+ "fedimint-escrow-client",
  "fedimint-logging",
  "tokio",
  "tracing",
@@ -2294,8 +2310,8 @@ dependencies = [
  "anyhow",
  "fedimint-build 0.4.0-alpha",
  "fedimint-core",
- "fedimint-dummy-common 0.3.0",
- "fedimint-dummy-server",
+ "fedimint-escrow-common",
+ "fedimint-escrow-server",
  "fedimintd",
  "tokio",
 ]
@@ -2694,6 +2710,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "hex-conservative"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1aa273bf451e37ed35ced41c71a5e2a4e29064afb104158f2514bcd71c2c986"
+dependencies = [
+ "arrayvec",
 ]
 
 [[package]]
