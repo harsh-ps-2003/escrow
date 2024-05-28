@@ -19,7 +19,7 @@ pub struct EscrowGenParamsLocal;
 /// Consensus parameters for config generation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EscrowGenParamsConsensus {
-    pub tx_fee: Amount,
+    pub deposit_fee: Amount,
 }
 
 impl Default for EscrowGenParams {
@@ -27,7 +27,7 @@ impl Default for EscrowGenParams {
         Self {
             local: EscrowGenParamsLocal,
             consensus: EscrowGenParamsConsensus {
-                tx_fee: Amount::ZERO,
+                deposit_fee: Amount::ZERO,
             },
         }
     }
@@ -45,7 +45,7 @@ pub struct EscrowConfig {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable, Hash)]
 pub struct EscrowClientConfig {
     /// Accessible to clients
-    pub tx_fee: Amount,
+    pub deposit_fee: Amount,
 }
 
 /// Locally unencrypted config unique to each member
@@ -56,7 +56,7 @@ pub struct EscrowConfigLocal;
 #[derive(Clone, Debug, Serialize, Deserialize, Decodable, Encodable)]
 pub struct EscrowConfigConsensus {
     /// Will be the same for all peers
-    pub tx_fee: Amount,
+    pub deposit_fee: Amount,
 }
 
 /// Will be encrypted and not shared such as private key material

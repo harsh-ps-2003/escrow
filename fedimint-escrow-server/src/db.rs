@@ -1,90 +1,63 @@
-use fedimint_core::db::{DatabaseTransaction, IDatabaseTransactionOpsCoreTyped};
+use fedimint_client::sm::DynState;
+use fedimint_core::core::ModuleInstanceId;
+use fedimint_core::db::{DatabaseTransaction, DatabaseValue, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::{impl_db_lookup, impl_db_record, Amount, OutPoint};
-use futures::StreamExt;
+use fedimint_core::module::registry::ModuleDecoderRegistry;
+use fedimint_core::{impl_db_record, Amount};
+use fedimint_escrow_common::Nonce;
 use secp256k1::PublicKey;
-use serde::Serialize;
 use strum_macros::EnumIter;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+use sha2::{Digest, Sha256};
 
-use crate::EscrowOutputOutcome;
-
-/// Namespaces DB keys for this module
+// Define the key prefix for the database
 #[repr(u8)]
-#[derive(Clone, EnumIter, Debug)]
+#[derive(Clone, Debug, EnumIter)]
 pub enum DbKeyPrefix {
-    Funds = 0x01,
-    Outcome = 0x02,
+    Escrow = 0x04,
 }
 
-// TODO: Boilerplate-code
 impl std::fmt::Display for DbKeyPrefix {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{self:?}")
+        write!(f, "{:?}", self)
     }
 }
 
-/// Example old version 0 of DB entries
-// TODO: can we simplify this by just using macros?
+// Define the key structure using a Nonce
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
-pub struct EscrowFundsKeyV0(pub PublicKey);
+pub struct NonceKey(pub Nonce);
 
 #[derive(Debug, Encodable, Decodable)]
-pub struct EscrowFundsKeyPrefixV0;
+pub struct NonceKeyPrefix;
 
 impl_db_record!(
-    key = EscrowFundsKeyV0,
+    key = NonceKey,
     value = (),
-    db_prefix = DbKeyPrefix::Funds,
-);
-impl_db_lookup!(
-    key = EscrowFundsKeyV0,
-    query_prefix = EscrowFundsKeyPrefixV0
+    db_prefix = DbKeyPrefix::Escrow,
 );
 
-/// Lookup funds for a user by key or prefix
-#[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
-pub struct EscrowFundsKeyV1(pub PublicKey);
+impl_db_lookup!(key = NonceKey, query_prefix = NonceKeyPrefix);
 
-#[derive(Debug, Encodable, Decodable)]
-pub struct EscrowFundsPrefixV1;
-
-impl_db_record!(
-    key = EscrowFundsKeyV1,
-    value = Amount,
-    db_prefix = DbKeyPrefix::Funds,
-);
-impl_db_lookup!(key = EscrowFundsKeyV1, query_prefix = EscrowFundsPrefixV1);
-
-/// Example DB migration from version 0 to version 1
-pub async fn migrate_to_v1(dbtx: &mut DatabaseTransaction<'_>) -> Result<(), anyhow::Error> {
-    // Select old entries
-    let v0_entries = dbtx
-        .find_by_prefix(&EscrowFundsKeyPrefixV0)
-        .await
-        .collect::<Vec<(EscrowFundsKeyV0, ())>>()
-        .await;
-
-    // Remove old entries
-    dbtx.remove_by_prefix(&EscrowFundsKeyPrefixV0).await;
-
-    // Migrate to new entries
-    for (v0_key, _v0_val) in v0_entries {
-        let v1_key = EscrowFundsKeyV1(v0_key.0);
-        dbtx.insert_new_entry(&v1_key, &Amount::ZERO).await;
-    }
-    Ok(())
+// Define the key structure using a UUID
+#[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash)]
+pub struct EscrowKey {
+    pub uuid: Uuid,
 }
 
-/// Lookup tx outputs by key or prefix
-#[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
-pub struct EscrowOutcomeKey(pub OutPoint);
+// Define the value structure for the database record
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EscrowValue {
+    pub buyer: PublicKey,
+    pub seller: PublicKey,
+    pub arbiter: PublicKey,
+    pub amount: Amount,
+    pub code_hash: [u8; 32],
+}
 
-#[derive(Debug, Encodable, Decodable)]
-pub struct EscrowOutcomePrefix;
-
+// Implement database record creation and lookup
 impl_db_record!(
-    key = EscrowOutcomeKey,
-    value = EscrowOutputOutcome,
-    db_prefix = DbKeyPrefix::Outcome,
+    key = EscrowKey,
+    value = EscrowValue,
+    db_prefix = DbKeyPrefix::Escrow,
 );
-impl_db_lookup!(key = EscrowOutcomeKey, query_prefix = EscrowOutcomePrefix);

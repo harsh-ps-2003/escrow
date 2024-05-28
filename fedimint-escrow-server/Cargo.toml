@@ -30,3 +30,4 @@ thiserror = { workspace = true }
 fedimint-server = { workspace = true }
 tracing = { workspace = true }
 tokio = { version = "1.26.0", features = ["sync"] }
+uuid = { version = "1.8.0", features = ["v4"] }

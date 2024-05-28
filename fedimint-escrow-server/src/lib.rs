@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use anyhow::bail;
 use async_trait::async_trait;
 use fedimint_core::config::{
@@ -19,23 +17,18 @@ use fedimint_core::server::DynServerModule;
 use fedimint_core::{push_db_pair_items, Amount, OutPoint, PeerId, ServerModule};
 use fedimint_escrow_common::config::{
     EscrowClientConfig, EscrowConfig, EscrowConfigConsensus, EscrowConfigLocal,
-    EscrowConfigPrivate, EscrowGenParams,
+    EscrowConfigPrivate, EscrowGenParams, CODE,
 };
 use fedimint_escrow_common::{
     broken_fed_public_key, fed_public_key, EscrowCommonInit, EscrowConsensusItem, EscrowInput,
-    EscrowInputError, EscrowModuleTypes, EscrowOutput, EscrowOutputError, EscrowOutputOutcome,
-    CONSENSUS_VERSION,
+    EscrowInputError, EscrowModuleTypes, EscrowOutput, EscrowOutputError, CONSENSUS_VERSION,
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
-use futures::{FutureExt, StreamExt};
-use strum::IntoEnumIterator;
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
-use crate::db::{
-    migrate_to_v1, DbKeyPrefix, EscrowFundsKeyV1, EscrowFundsPrefixV1, EscrowOutcomeKey,
-    EscrowOutcomePrefix,
-};
+use crate::db::{DbKeyPrefix, EscrowKey, NonceKey, NonceKeyPrefix};
 
-pub mod db;
 /// Generates the module
 #[derive(Debug, Clone)]
 pub struct EscrowInit;
@@ -60,24 +53,11 @@ impl ModuleInit for EscrowInit {
 
         for table in filtered_prefixes {
             match table {
-                DbKeyPrefix::Funds => {
+                DbKeyPrefix::Escrow => {
                     push_db_pair_items!(
-                        dbtx,
-                        EscrowFundsPrefixV1,
-                        EscrowFundsKeyV1,
-                        Amount,
-                        items,
-                        "Escrow Funds"
-                    );
-                }
-                DbKeyPrefix::Outcome => {
-                    push_db_pair_items!(
-                        dbtx,
-                        EscrowOutcomePrefix,
-                        EscrowOutcomeKey,
-                        EscrowOutputOutcome,
-                        items,
-                        "Escrow Outputs"
+                        dbtx, Escrow, EscrowKey,
+                        Amount, // i guess it should be string (ecash)
+                        items, "Escrow"
                     );
                 }
             }
@@ -110,13 +90,6 @@ impl ServerModuleInit for EscrowInit {
         Ok(Escrow::new(args.cfg().to_typed()?).into())
     }
 
-    /// DB migrations to move from old to newer versions
-    fn get_database_migrations(&self) -> BTreeMap<DatabaseVersion, ServerMigrationFn> {
-        let mut migrations: BTreeMap<DatabaseVersion, ServerMigrationFn> = BTreeMap::new();
-        migrations.insert(DatabaseVersion(0), move |dbtx| migrate_to_v1(dbtx).boxed());
-        migrations
-    }
-
     /// Generates configs for all peers in a trusted manner for testing
     fn trusted_dealer_gen(
         &self,
@@ -132,7 +105,7 @@ impl ServerModuleInit for EscrowInit {
                     local: EscrowConfigLocal {},
                     private: EscrowConfigPrivate,
                     consensus: EscrowConfigConsensus {
-                        tx_fee: params.consensus.tx_fee,
+                        deposit_fee: params.consensus.deposit_fee,
                     },
                 };
                 (peer, config.to_erased())
@@ -152,7 +125,7 @@ impl ServerModuleInit for EscrowInit {
             local: EscrowConfigLocal {},
             private: EscrowConfigPrivate,
             consensus: EscrowConfigConsensus {
-                tx_fee: params.consensus.tx_fee,
+                deposit_fee: params.consensus.deposit_fee,
             },
         }
         .to_erased())
@@ -165,7 +138,7 @@ impl ServerModuleInit for EscrowInit {
     ) -> anyhow::Result<EscrowClientConfig> {
         let config = EscrowConfigConsensus::from_erased(config)?;
         Ok(EscrowClientConfig {
-            tx_fee: config.tx_fee,
+            deposit_fee: config.deposit_fee,
         })
     }
 
@@ -212,39 +185,21 @@ impl ServerModule for Escrow {
         dbtx: &mut DatabaseTransaction<'c>,
         input: &'b EscrowInput,
     ) -> Result<InputMeta, EscrowInputError> {
-        let current_funds = dbtx
-            .get_value(&EscrowFundsKeyV1(input.account))
+        // mark ecash as spent
+        if dbtx
+            .insert_entry(&NonceKey(input.note.nonce), &())
             .await
-            .unwrap_or(Amount::ZERO);
-
-        // verify user has enough funds or is using the fed account
-        if input.amount > current_funds
-            && fed_public_key() != input.account
-            && broken_fed_public_key() != input.account
+            .is_some()
         {
-            return Err(EscrowInputError::NotEnoughFunds);
+            return Err(EscrowInputError::ProblemSpendingEcash);
         }
-
-        // Subtract funds from normal user, or print funds for the fed
-        let updated_funds = if fed_public_key() == input.account {
-            current_funds + input.amount
-        } else if broken_fed_public_key() == input.account {
-            // The printer is broken
-            current_funds
-        } else {
-            current_funds - input.amount
-        };
-
-        dbtx.insert_entry(&EscrowFundsKeyV1(input.account), &updated_funds)
-            .await;
 
         Ok(InputMeta {
             amount: TransactionItemAmount {
                 amount: input.amount,
-                fee: self.cfg.consensus.tx_fee,
+                fee: self.cfg.consensus.deposit_fee,
             },
-            // IMPORTANT: include the pubkey to validate the user signed this tx
-            pub_key: input.account,
+            pub_key: self.key().public_key(), //buyers public key
         })
     }
 
@@ -254,20 +209,28 @@ impl ServerModule for Escrow {
         output: &'a EscrowOutput,
         out_point: OutPoint,
     ) -> Result<TransactionItemAmount, EscrowOutputError> {
-        // Add output funds to the user's account
-        let current_funds = dbtx.get_value(&EscrowFundsKeyV1(output.account)).await;
-        let updated_funds = current_funds.unwrap_or(Amount::ZERO) + output.amount;
-        dbtx.insert_entry(&EscrowFundsKeyV1(output.account), &updated_funds)
-            .await;
-
-        // Update the output outcome the user can query
-        let outcome = EscrowOutputOutcome(updated_funds, output.account);
-        dbtx.insert_entry(&EscrowOutcomeKey(out_point), &outcome)
-            .await;
+        // create a random uuid for escrow
+        let random_uuid = Uuid::new_v4();
+        let code_hash = hash_secret_code(CODE);
+        // Create the escrow entry in the guardians' DB
+        let escrow_value = EscrowValue {
+            buyer: output.buyer,
+            seller: output.seller,
+            arbiter: output.arbiter,
+            amount: output.amount.to_string(),
+            code_hash: code_hash,
+        };
+        dbtx.insert_new_entry(
+            &EscrowKey {
+                uuid: random_uuid.to_string(),
+            },
+            &escrow_value,
+        )
+        .await;
 
         Ok(TransactionItemAmount {
             amount: output.amount,
-            fee: self.cfg.consensus.tx_fee,
+            fee: self.cfg.consensus.deposit_fee,
         })
     }
 
@@ -286,28 +249,36 @@ impl ServerModule for Escrow {
         audit: &mut Audit,
         module_instance_id: ModuleInstanceId,
     ) {
-        audit
-            .add_items(
-                dbtx,
-                module_instance_id,
-                &EscrowFundsPrefixV1,
-                |k, v| match k {
-                    // the fed's test account is considered an asset (positive)
-                    // should be the bitcoin we own in a real module
-                    EscrowFundsKeyV1(key)
-                        if key == fed_public_key() || key == broken_fed_public_key() =>
-                    {
-                        v.msats as i64
-                    }
-                    // a user's funds are a federation's liability (negative)
-                    EscrowFundsKeyV1(_) => -(v.msats as i64),
-                },
-            )
-            .await;
+        unimplemented!()
+        // audit
+        //     .add_items(
+        //         dbtx,
+        //         module_instance_id,
+        //         &EscrowKey,
+        //         |k, v| match k {
+        //             // the fed's test account is considered an asset
+        // (positive)             // should be the bitcoin we own in a
+        // real module             EscrowKey(key)
+        //                 if key == fed_public_key() || key ==
+        // broken_fed_public_key() =>             {
+        //                 v.msats as i64
+        //             }
+        //             // a user's funds are a federation's liability (negative)
+        //             EscrowKey(_) => -(v.msats as i64),
+        //         },
+        //     )
+        //     .await;
     }
 
+    // api will be called in client
     fn api_endpoints(&self) -> Vec<ApiEndpoint<Self>> {
-        Vec::new()
+        vec![api_endpoint! {
+            GET_MODULE_INFO,
+            ApiVersion::new(0, 0),
+            async |module: &Meta, context, request: GetModuleInfoRequest| -> ModuleInfo {
+                module.handle_get_module_info(&mut context.dbtx().into_nc(), &request).await
+            }
+        }]
     }
 }
 
@@ -315,5 +286,32 @@ impl Escrow {
     /// Create new module instance
     pub fn new(cfg: EscrowConfig) -> Escrow {
         Escrow { cfg }
+    }
+
+    async fn handle_get_module_info(
+        &self,
+        dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
+        req: &GetModuleInfoRequest,
+    ) -> Result<ModuleInfo, ApiError> {
+        let escrow_value: Option<EscrowValue> = dbtx
+            .get_value(&EscrowKey {
+                uuid: req.escrow_id.to_string(),
+            })
+            .await?;
+        match escrow_value {
+            Some(value) => Ok(ModuleInfo {
+                buyer: value.buyer,
+                seller: value.seller,
+                arbiter: value.arbiter,
+                ecash: value.amount,
+            }),
+            None => Err(ApiError::EscrowNotFound),
+        }
+    }
+
+    fn hash_secret_code(secret_code: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(secret_code);
+        format!("{:x}", hasher.finalize())
     }
 }

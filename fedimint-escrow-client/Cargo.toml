@@ -26,6 +26,7 @@ strum_macros = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 threshold_crypto = { workspace = true }
+uuid = { version = "1.8.0", features = ["v4"] }
 
 [build-dependencies]
 fedimint-build = { git = "https://github.com/fedimint/fedimint" }

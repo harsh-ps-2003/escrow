@@ -28,3 +28,4 @@ strum_macros = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 threshold_crypto = { workspace = true }
+uuid = { version = "1.8.0", features = ["v4"] }
