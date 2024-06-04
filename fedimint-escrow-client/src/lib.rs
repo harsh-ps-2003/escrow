@@ -13,6 +13,7 @@ use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint};
 use fedimint_escrow_common::config::EscrowClientConfig;
 use fedimint_escrow_common::{EscrowInput, EscrowModuleTypes, EscrowOutput, Note, KIND};
 use fedimint_escrow_server::states::EscrowStateMachine;
+use fedimint_mint_client::MintClientModule::{create_input, create_output};
 use secp256k1::{PublicKey, Secp256k1};
 use uuid::Uuid;
 
@@ -56,10 +57,12 @@ impl ClientModule for EscrowClientModule {
         &self,
         input: &<Self::Common as ModuleCommon>::Input,
     ) -> Option<TransactionItemAmount> {
-        Some(TransactionItemAmount {
-            amount: input.amount,
-            fee: Amount::ZERO, // seller does not need to pay any fee
-        })
+        // Some(TransactionItemAmount {
+        //     amount: input.amount,
+        //     fee: Amount::ZERO, // seller does not need to pay any fee
+        // })
+        // we are using mint input instead of escrow input
+        unimplemented!()
     }
 
     // conveys to the transaction the monetary value of escrow output so as to burn
@@ -83,44 +86,23 @@ impl ClientModule for EscrowClientModule {
     }
 }
 
-// attach ecash to the transaction and submit it to federation
 impl EscrowClientModule {
-    pub async fn buyer_txn(
-        &self,
-        amount: Amount,
-        buyer: PublicKey,
-        seller: PublicKey,
-        arbiter: PublicKey,
-    ) -> anyhow::Result<(OperationId, OutPoint)> {
+    // attach ecash to the transaction and submit it to federation
+    pub async fn buyer_txn(&self, amount: Amount) -> anyhow::Result<(OperationId, OutPoint)> {
         let operation_id = OperationId(thread_rng().gen());
         let escrow_id = Uuid::new_v4();
+        let mut dbtx = self.client_ctx.db().begin_transaction().await;
 
-        // Create input using the buyer account
-        let input = ClientInput {
-            input: EscrowInput {
-                amount: Amount::ZERO,
-                note: Note::new(),
-            },
-            keys: vec![self.key],
-            state_machines: Arc::new(move |_, _| Vec::<EscrowStateMachine>::new()),
-        };
-
-        // Create output using the seller account
-        let output = ClientOutput {
-            output: EscrowOutput {
-                amount,
-                buyer,
-                seller,
-                arbiter,
-            },
-            state_machines: Arc::new(move |_, _| Vec::<EscrowStateMachine>::new()),
-        };
+        // mint output
+        let output = self
+            .client_ctx
+            .create_output(&mut dbtx, operation_id, 1, amount)
+            .await?;
 
         // Build and send tx to the fed by underfunding the transaction
-        // Will output to mint module
-        let tx = TransactionBuilder::new()
-            .with_input(self.client_ctx.make_client_input(input))
-            .with_output(self.client_ctx.make_client_output(output));
+        // The transaction builder will select the necessary e-cash notes with mint
+        // output to cover the output amount and create the corresponding inputs itself
+        let tx = TransactionBuilder::new().with_output(self.client_ctx.make_client_output(output));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
         let (_, change) = self
             .client_ctx
@@ -132,34 +114,25 @@ impl EscrowClientModule {
         Ok((operation_id, change[0], escrow_id))
     }
 
-    pub async fn seller_txn(&self, escrow_id: Uuid, secret_code: String) -> anyhow::Result<()> {
+    pub async fn seller_txn(
+        &self,
+        escrow_id: Uuid,
+        secret_code: String,
+        amount: Amount,
+    ) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
+        let mut dbtx = self.client_ctx.db().begin_transaction().await;
         // Transfer ecash to seller by overfunding the transaction
         // Create input using the buyer account
-        let input = ClientInput {
-            input: EscrowInput {
-                amount,
-                note: Note::new(),
-            },
-            keys: vec![], // seller keypair?
-            state_machines: Arc::new(move |_, _| Vec::<EscrowStateMachine>::new()),
-        };
-
-        // Create output using the seller account
-        let output = ClientOutput {
-            output: EscrowOutput {
-                amount: Amount::ZERO,
-                buyer,
-                seller,
-                arbiter,
-            },
-            state_machines: Arc::new(move |_, _| Vec::<EscrowStateMachine>::new()),
-        };
+        let input = self
+            .client_ctx
+            .create_input(&mut dbtx, operation_id, amount)
+            .await?;
 
         // Build and send tx to the fed
-        let tx = TransactionBuilder::new()
-            .with_input(self.client_ctx.make_client_input(input))
-            .with_output(self.client_ctx.make_client_output(output));
+        // The transaction builder will create mint output to cover the input amount by
+        // itself
+        let tx = TransactionBuilder::new().with_input(self.client_ctx.make_client_input(input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
         let (_, change) = self
             .client_ctx
@@ -169,6 +142,7 @@ impl EscrowClientModule {
         Ok(())
     }
 
+    // anyway to update guardians db directly?
     async fn change_state_to_open(&self, escrow_id: Uuid) -> anyhow::Result<()> {
         let dbtx = self.client_ctx.db().begin_transaction().await?;
         let new_state = EscrowStateMachine::Open(escrow_id);

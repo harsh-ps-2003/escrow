@@ -5,7 +5,7 @@ use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
 use fedimint_core::{plugin_types_trait_impl_common, Amount};
-use secp256k1::PublicKey;
+use secp256k1::{KeyPair, PublicKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -21,57 +21,38 @@ pub const CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion::ne
 
 pub const CODE: String = Uuid::new_v4().to_string();
 
-#[derive(
-    Debug,
-    Copy,
-    Clone,
-    Eq,
-    PartialEq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Deserialize,
-    Serialize,
-    Encodable,
-    Decodable,
-)]
-pub struct Nonce(pub secp256k1_zkp::PublicKey);
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct Note {
-    pub nonce: Nonce,
-    pub signature: tbs::Signature,
-}
-
 /// Non-transaction items that will be submitted to consensus
 /// The Fedimint txn is the only thing that requires consensus from guardians,
 /// other than this we are not proposing any changes.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct EscrowConsensusItem;
 
+/*
+The finalize_and_submit_transaction_inner function is responsible for finalizing the transaction and preparing it for submission to the federation.
+The actual submission to the federation, which would involve adding the transaction to the guardians' database, is handled by the state machine that is created and managed by the executor.
+So cant commit values to federation (guardians) DB directly, will need escrowoutput for it most probably!
+If we use escrow output, we still want to use mint output in it, so process_output will have to be involved, but wont it be simple copy pasting from mintoutput's process_output?
+*/
+
 /// Input for a Fedimint transaction
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct EscrowInput {
-    pub amount: Amount,
-    pub note: Note,
-}
+// #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
+// pub struct EscrowInput {
+//     pub amount: Amount,
+// }
 
 /// Output for a Fedimint transaction
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct EscrowOutput {
-    pub amount: String,
-    pub buyer: PublicKey,
-    pub seller: PublicKey,
-    pub arbiter: PublicKey,
-}
+// #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
+// pub struct EscrowOutput {
+//     pub amount: Amount,
+//     pub buyer: KeyPair,
+//     pub seller: KeyPair,
+//     pub arbiter: PublicKey,
+// }
 
 /// Errors that might be returned by the server when the buyer awaits guardians
 /// that the requested amount is burned
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
-pub enum EscrowInputError {
-    #[error("Not able to spend ecash from buyer's account!")]
-    ProblemSpendingEcash,
-}
+pub enum EscrowInputError {}
 
 /// Errors that might be returned by the server
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
@@ -120,12 +101,6 @@ impl fmt::Display for EscrowInput {
 impl fmt::Display for EscrowOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "EscrowOutput: {}", self.amount)
-    }
-}
-
-impl fmt::Display for EscrowConsensusItem {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "EscrowConsensusItem")
     }
 }
 

@@ -24,21 +24,6 @@ impl std::fmt::Display for DbKeyPrefix {
     }
 }
 
-// Define the key structure using a Nonce
-#[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
-pub struct NonceKey(pub Nonce);
-
-#[derive(Debug, Encodable, Decodable)]
-pub struct NonceKeyPrefix;
-
-impl_db_record!(
-    key = NonceKey,
-    value = (),
-    db_prefix = DbKeyPrefix::Escrow,
-);
-
-impl_db_lookup!(key = NonceKey, query_prefix = NonceKeyPrefix);
-
 // Define the key structure using a UUID
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash)]
 pub struct EscrowKey {

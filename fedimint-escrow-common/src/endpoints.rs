@@ -14,5 +14,6 @@ pub struct ModuleInfo {
     pub buyer: PublicKey,
     pub seller: PublicKey,
     pub arbiter: PublicKey,
-    pub ecash: String
+    pub amount: Amount,
+    pub code_hash: [u8; 32],
 }

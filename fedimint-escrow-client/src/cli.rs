@@ -20,7 +20,7 @@ enum Command {
         buyer: PublicKey,
         seller: PublicKey,
         arbiter: PublicKey,
-        cost: u64, //cost of ecash
+        amount: u64, //actual cost of product
     },
     EscrowInfo {
         escrow_id: Uuid,
@@ -48,11 +48,33 @@ pub(crate) async fn handle_cli_command(
             arbiter,
             cost,
         } => {
-            // finalize_and_submit txns to burn ecash (underfunded)
-            let (operation_id, out_point, escrow_id) = escrow
-                .buyer_txn(Amount::from_sat(cost), buyer, seller, arbiter)
-                .await?;
-            // If transaction is accepted and state is opened in server, send escrow ID
+            // finalize_and_submit txns to lock ecash (underfunded)
+            let (operation_id, out_point, escrow_id) =
+                escrow.buyer_txn(Amount::from_sat(cost)).await?;
+            // even though unique transaction id will be assigned, escrow id will used to
+            // collectively get all data related to the escrow
+
+            // TODO : will be moved around
+            let code_hash = hash_secret_code(CODE);
+            // Create the escrow entry in the guardians' DB
+            let escrow_value = EscrowValue {
+                buyer,
+                seller,
+                arbiter,
+                amount: output.amount.to_string(),
+                code_hash: code_hash,
+            };
+            // cant we directly commit to guardians DB if the transaction using mintoutput
+            // is successful? update the entry using operation_id?
+            dbtx.insert_new_entry(
+                &EscrowKey {
+                    uuid: escrow_id.to_string(),
+                },
+                &escrow_value,
+            )
+            .await;
+            // If transaction is accepted and state is opened in server, send escrow ID and
+            // CODE
             Ok(json!({
                 "secret-code": CODE,
                 "escrow-id": escrow_id,
@@ -67,6 +89,7 @@ pub(crate) async fn handle_cli_command(
                 .api()
                 .request(GET_MODULE_INFO, request)
                 .await?;
+            // also show the state of escrow!
             Ok(serde_json::to_value(response)?)
         }
         Command::EscrowClaim {

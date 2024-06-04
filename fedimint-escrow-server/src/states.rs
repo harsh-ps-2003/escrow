@@ -16,6 +16,14 @@ pub enum EscrowStateMachine {
     Disputed(escrow_id),
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
+pub enum EscrowStates {
+    Created,
+    Open,
+    Resolved,
+    Disputed,
+}
+
 impl State for EscrowStateMachine {
     type ModuleContext = EscrowClientContext;
 

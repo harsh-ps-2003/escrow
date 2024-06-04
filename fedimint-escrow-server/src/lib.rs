@@ -185,53 +185,29 @@ impl ServerModule for Escrow {
         dbtx: &mut DatabaseTransaction<'c>,
         input: &'b EscrowInput,
     ) -> Result<InputMeta, EscrowInputError> {
-        // mark ecash as spent
-        if dbtx
-            .insert_entry(&NonceKey(input.note.nonce), &())
-            .await
-            .is_some()
-        {
-            return Err(EscrowInputError::ProblemSpendingEcash);
-        }
-
-        Ok(InputMeta {
-            amount: TransactionItemAmount {
-                amount: input.amount,
-                fee: self.cfg.consensus.deposit_fee,
-            },
-            pub_key: self.key().public_key(), //buyers public key
-        })
+        // Ok(InputMeta {
+        //     amount: TransactionItemAmount {
+        //         amount: input.amount,
+        //         fee: self.cfg.consensus.deposit_fee,
+        //     },
+        //     pub_key: self.key().public_key(), //buyers public key
+        // })
+        unimplemented!()
+        // using mint input
     }
 
     async fn process_output<'a, 'b>(
         &'a self,
         dbtx: &mut DatabaseTransaction<'b>,
-        output: &'a EscrowOutput,
+        output: &'a ClientOutput,
         out_point: OutPoint,
     ) -> Result<TransactionItemAmount, EscrowOutputError> {
-        // create a random uuid for escrow
-        let random_uuid = Uuid::new_v4();
-        let code_hash = hash_secret_code(CODE);
-        // Create the escrow entry in the guardians' DB
-        let escrow_value = EscrowValue {
-            buyer: output.buyer,
-            seller: output.seller,
-            arbiter: output.arbiter,
-            amount: output.amount.to_string(),
-            code_hash: code_hash,
-        };
-        dbtx.insert_new_entry(
-            &EscrowKey {
-                uuid: random_uuid.to_string(),
-            },
-            &escrow_value,
-        )
-        .await;
-
-        Ok(TransactionItemAmount {
-            amount: output.amount,
-            fee: self.cfg.consensus.deposit_fee,
-        })
+        // Ok(TransactionItemAmount {
+        //     amount: output.amount,
+        //     fee: self.cfg.consensus.deposit_fee,
+        // })
+        unimplemented!()
+        // using mint output
     }
 
     async fn output_status(
@@ -240,7 +216,7 @@ impl ServerModule for Escrow {
         out_point: OutPoint,
     ) -> Option<EscrowOutputOutcome> {
         // check whether or not the output has been processed
-        dbtx.get_value(&EscrowOutcomeKey(out_point)).await
+        unimplemented!()
     }
 
     async fn audit(
