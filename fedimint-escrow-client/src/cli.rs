@@ -56,7 +56,7 @@ pub(crate) async fn handle_cli_command(
 
             // TODO : will be moved around
             let code_hash = hash_secret_code(CODE);
-            // Create the escrow entry in the guardians' DB
+            // Create the escrow entry in the guardians' DB directly if possible!
             let escrow_value = EscrowValue {
                 buyer,
                 seller,

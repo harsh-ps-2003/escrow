@@ -38,6 +38,7 @@ pub struct EscrowValue {
     pub arbiter: PublicKey,
     pub amount: Amount,
     pub code_hash: [u8; 32],
+    pub state: EscrowState,
 }
 
 // Implement database record creation and lookup

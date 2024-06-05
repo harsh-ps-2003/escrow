@@ -16,4 +16,5 @@ pub struct ModuleInfo {
     pub arbiter: PublicKey,
     pub amount: Amount,
     pub code_hash: [u8; 32],
+    pub state: EscrowState,
 }

@@ -193,7 +193,7 @@ impl ServerModule for Escrow {
         //     pub_key: self.key().public_key(), //buyers public key
         // })
         unimplemented!()
-        // using mint input
+        // using mint input right now!
     }
 
     async fn process_output<'a, 'b>(
@@ -207,7 +207,7 @@ impl ServerModule for Escrow {
         //     fee: self.cfg.consensus.deposit_fee,
         // })
         unimplemented!()
-        // using mint output
+        // using mint output directly right now!
     }
 
     async fn output_status(
