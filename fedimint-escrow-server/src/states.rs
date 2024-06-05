@@ -32,6 +32,9 @@ impl State for EscrowStateMachine {
         context: &Self::ModuleContext,
         global_context: &DynGlobalClientContext,
     ) -> Vec<StateTransition<Self>> {
+        // State transition logic using lib.rs
+        // when the transaction by buyer is successful, state is open
+
         match self.clone() {
             EscrowStateMachine::Open(escrow_id) => vec![StateTransition::new(
                 await_tx_accepted(global_context.clone(), txid),
@@ -40,21 +43,13 @@ impl State for EscrowStateMachine {
                     Err(_) => Box::pin(async move { EscrowStateMachine::Disputed(escrow_id) }),
                 },
             )],
-            EscrowStateMachine::ResolvedWithoutDispute(escrow_id) => vec![StateTransition::new(
-                async { Ok(()) },
-                move |_dbtx, _res, _state: Self| Box::pin(async move { EscrowStateMachine::Closed(escrow_id) }),
-            )],
-            EscrowStateMachine::ResolvedWithDispute(escrow_id) => vec![StateTransition::new(
-                async { Ok(()) },
-                move |_dbtx, _res, _state: Self| Box::pin(async move { EscrowStateMachine::Closed(escrow_id) }),
-            )],
-            EscrowStateMachine::Disputed(escrow_id) => vec![StateTransition::new(
-                async { call_arbiter(escrow_id).await },
-                move |_dbtx, _res, _state: Self| Box::pin(async move { EscrowStateMachine::Closed(escrow_id) }),
-            )],
+            EscrowStateMachine::ResolvedWithoutDispute(escrow_id) => vec![],
+            EscrowStateMachine::ResolvedWithDispute(escrow_id) => vec![],
+            EscrowStateMachine::Disputed(escrow_id) => vec![],
         }
     }
 
+    // TODO: escrow_id shouldnt be mapped to operation_id as as escrow_id is going to remain same, while for each transaction operation_id will differ
     fn operation_id(&self) -> OperationId {
         match self {
             EscrowStateMachine::Open(escrow_id) => *escrow_id,

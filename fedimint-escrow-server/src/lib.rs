@@ -279,7 +279,9 @@ impl Escrow {
                 buyer: value.buyer,
                 seller: value.seller,
                 arbiter: value.arbiter,
-                ecash: value.amount,
+                amount: value.amount,
+                code_hash: value.code_hash,
+                state: value.state,
             }),
             None => Err(ApiError::EscrowNotFound),
         }

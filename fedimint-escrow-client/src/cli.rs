@@ -20,7 +20,7 @@ enum Command {
         buyer: PublicKey,
         seller: PublicKey,
         arbiter: PublicKey,
-        amount: u64, //actual cost of product
+        amount: u64, // actual cost of product
     },
     EscrowInfo {
         escrow_id: Uuid,
