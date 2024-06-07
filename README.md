@@ -14,3 +14,5 @@ Get info (pubkey of all 3 and cost of product) about folks involved in escrow - 
 Seller Claim ecash from secret code obtained by happy buyer - `escrow claim <escrow-id> <secret-code>`
 
 Either of them call arbiter - `escrow dispute <escrow-id>`
+
+// create mermaid diagram to explain the architecture of the escrow!

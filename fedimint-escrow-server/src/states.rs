@@ -18,9 +18,9 @@ pub enum EscrowStateMachine {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum EscrowStates {
-    Created,
     Open,
-    Resolved,
+    ResolvedWithoutDispute,
+    ResolvedWithDispute,
     Disputed,
 }
 
@@ -39,6 +39,7 @@ impl State for EscrowStateMachine {
             EscrowStateMachine::Open(escrow_id) => vec![StateTransition::new(
                 await_tx_accepted(global_context.clone(), txid),
                 move |dbtx, res, _state: Self| match res {
+                    // client writes in own db, that txn completed after server side has already written it!
                     Ok(_) => Box::pin(async move { EscrowStateMachine::ResolvedWithoutDispute(escrow_id) }),
                     Err(_) => Box::pin(async move { EscrowStateMachine::Disputed(escrow_id) }),
                 },
@@ -68,6 +69,9 @@ impl IntoDynInstance for EscrowStateMachine {
         DynState::from_typed(instance_id, self)
     }
 }
-
+// TODO: dont forget to handle errors
 #[derive(Error, Debug, Serialize, Deserialize, Encodable, Decodable, Clone, Eq, PartialEq)]
-pub enum EscrowError {}
+pub enum EscrowError {
+    #[error("Escrow not found")]
+    EscrowNotFound,
+}

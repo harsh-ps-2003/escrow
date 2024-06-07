@@ -9,28 +9,31 @@ use secp256k1::PublicKey;
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 use super::EscrowClientModule;
 use crate::api::EscrowFederationApi;
 
+// make sure you are sending clone of things, not references or direct sending!
+
+// TODO: we need cli-commands as well as API endpoints for these commands!
 #[derive(Parser, Serialize)]
 enum Command {
     CreateEscrow {
         buyer: PublicKey,
         seller: PublicKey,
         arbiter: PublicKey,
-        amount: u64, // actual cost of product
+        cost: u64, // actual cost of product
     },
     EscrowInfo {
-        escrow_id: Uuid,
+        escrow_id: String,
     },
     EscrowClaim {
-        escrow_id: Uuid,
+        escrow_id: String,
         secret_code: String,
     },
     EscrowDispute {
-        escrow_id: Uuid,
+        escrow_id: String,
+        arbiter: PublicKey,
     },
 }
 
@@ -48,48 +51,33 @@ pub(crate) async fn handle_cli_command(
             arbiter,
             cost,
         } => {
-            // finalize_and_submit txns to lock ecash (underfunded)
+            // finalize_and_submit txns to lock ecash by underfunding
+            // how to call this method?
             let (operation_id, out_point, escrow_id) =
-                escrow.buyer_txn(Amount::from_sat(cost)).await?;
+                buyer_txn(Amount::from_sat(cost), buyer, seller, arbiter).await?;
             // even though unique transaction id will be assigned, escrow id will used to
             // collectively get all data related to the escrow
-
-            // TODO : will be moved around
-            let code_hash = hash_secret_code(CODE);
-            // Create the escrow entry in the guardians' DB directly if possible!
-            let escrow_value = EscrowValue {
-                buyer,
-                seller,
-                arbiter,
-                amount: output.amount.to_string(),
-                code_hash: code_hash,
-            };
-            // cant we directly commit to guardians DB if the transaction using mintoutput
-            // is successful? update the entry using operation_id?
-            dbtx.insert_new_entry(
-                &EscrowKey {
-                    uuid: escrow_id.to_string(),
-                },
-                &escrow_value,
-            )
-            .await;
-            // If transaction is accepted and state is opened in server, send escrow ID and
+            pub const CODE: String =
+                hash256((vec![buyer, seller, arbiter, cost].concat()).reverse());
+            // If transaction is accepted and state is opened in server, share escrow ID and
             // CODE
             Ok(json!({
-                "secret-code": CODE,
+                "secret-code": CODE, // shared by buyer out of band to seller
                 "escrow-id": escrow_id,
-                "status": "escrow opened!"
+                "state": "escrow opened!"
             }))
         }
         Command::EscrowInfo { escrow_id } => {
             // get escrow info corresponding to the id from db using federation api
             let request = GetModuleInfoRequest { escrow_id };
+            // TODO: we need to get the escrow state from the server here, so api endpoint
+            // should use server dbtx
             let response: ModuleInfo = escrow
                 .client_ctx
                 .api()
                 .request(GET_MODULE_INFO, request)
                 .await?;
-            // also show the state of escrow!
+            // also show the state of escrow with amount and buyers pubkey!
             Ok(serde_json::to_value(response)?)
         }
         Command::EscrowClaim {
@@ -97,10 +85,9 @@ pub(crate) async fn handle_cli_command(
             secret_code,
             amount,
         } => {
-            // if disputed some ecash fee to arbiter also
             // otherwise normal ecash to seller
             // escrow state is closed
-            // make an api call to db and get code hash, and then verify it
+            // make an api call to server db and get code hash, and then verify it
             let dbtx = self.db.begin_transaction().await?;
             let escrow_value: Option<EscrowValue> = dbtx
                 .get_value(&EscrowKey {
@@ -111,31 +98,35 @@ pub(crate) async fn handle_cli_command(
                 Some(value) => Ok(value.code_hash),
                 None => Err(anyhow::Error::msg("Escrow not found")),
             }
-            if value.code_hash != hash_secret_code(secret_code) {
+            if value.code_hash != hash256(secret_code) {
                 return Err(anyhow::Error::msg("Invalid secret code"));
             }
-            // seller claims ecash through finalize_and_submit txn (overfunded)
+            // seller claims ecash through finalize_and_submit txn by overfunding
             escrow.seller_txn(escrow_id, secret_code, amount).await?;
             Ok(json!({
                 "escrow_id": escrow_id,
                 "status": "claimed"
             }))
+
+            // first handle server side state, then client side!
         }
-        Command::EscrowDispute { escrow_id } => {
+        Command::EscrowDispute { escrow_id, arbiter } => {
+            // by buyer and seller both
             // Call the arbiter and change the state to disputed
+            // the arbiter will take a fee (decided off band)
             escrow.initiate_dispute(escrow_id).await?;
             Ok(json!({
                 "escrow_id": escrow_id,
                 "status": "disputed"
             }))
+            // out of band notification to arbiter give escrow_id to get the
+            // contract detail
         } // arbiter can tell fed to pay ecash to buyer
     };
 
-    Ok(res)
-}
+    // arbiter release funds commands
+    // seller should be able to revert back after fixed time if something happens to
+    // the buyer, vice versa
 
-fn hash_secret_code(secret_code: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(secret_code);
-    hex::encode(hasher.finalize())
+    Ok(res)
 }

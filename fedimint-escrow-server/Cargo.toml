@@ -21,6 +21,7 @@ erased-serde = { workspace = true }
 futures = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-escrow-common = { path = "../fedimint-escrow-common" }
+fedimint-escrow-client = { path = "../fedimint-escrow-client" }
 rand = { workspace = true }
 serde = { workspace = true }
 secp256k1 = { workspace = true }
@@ -30,4 +31,3 @@ thiserror = { workspace = true }
 fedimint-server = { workspace = true }
 tracing = { workspace = true }
 tokio = { version = "1.26.0", features = ["sync"] }
-uuid = { version = "1.8.0", features = ["v4"] }

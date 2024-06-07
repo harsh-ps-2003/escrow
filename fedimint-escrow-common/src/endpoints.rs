@@ -1,12 +1,11 @@
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 // get escrow information in the client side
 pub const GET_MODULE_INFO: &str = "get_module_info";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GetModuleInfoRequest {
-    pub escrow_id: Uuid,
+    pub escrow_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

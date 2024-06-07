@@ -8,7 +8,6 @@ use fedimint_escrow_common::Nonce;
 use secp256k1::PublicKey;
 use strum_macros::EnumIter;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use sha2::{Digest, Sha256};
 
 // Define the key prefix for the database
@@ -27,7 +26,7 @@ impl std::fmt::Display for DbKeyPrefix {
 // Define the key structure using a UUID
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash)]
 pub struct EscrowKey {
-    pub uuid: Uuid,
+    pub escrow_id: String,
 }
 
 // Define the value structure for the database record
