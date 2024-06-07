@@ -53,8 +53,9 @@ pub(crate) async fn handle_cli_command(
         } => {
             // finalize_and_submit txns to lock ecash by underfunding
             // how to call this method?
-            let (operation_id, out_point, escrow_id) =
-                buyer_txn(Amount::from_sat(cost), buyer, seller, arbiter).await?;
+            let (operation_id, out_point, escrow_id) = escrow
+                .buyer_txn(Amount::from_sat(cost), buyer, seller, arbiter)
+                .await?;
             // even though unique transaction id will be assigned, escrow id will used to
             // collectively get all data related to the escrow
             pub const CODE: String =
@@ -77,7 +78,6 @@ pub(crate) async fn handle_cli_command(
                 .api()
                 .request(GET_MODULE_INFO, request)
                 .await?;
-            // also show the state of escrow with amount and buyers pubkey!
             Ok(serde_json::to_value(response)?)
         }
         Command::EscrowClaim {
@@ -85,20 +85,13 @@ pub(crate) async fn handle_cli_command(
             secret_code,
             amount,
         } => {
-            // otherwise normal ecash to seller
-            // escrow state is closed
             // make an api call to server db and get code hash, and then verify it
-            let dbtx = self.db.begin_transaction().await?;
-            let escrow_value: Option<EscrowValue> = dbtx
-                .get_value(&EscrowKey {
-                    uuid: escrow_id.to_string(),
-                })
+            let response: [u8; 32] = escrow
+                .client_ctx
+                .api()
+                .request(GET_SECRET_CODE_HASH, escrow_id)
                 .await?;
-            match escrow_value {
-                Some(value) => Ok(value.code_hash),
-                None => Err(anyhow::Error::msg("Escrow not found")),
-            }
-            if value.code_hash != hash256(secret_code) {
+            if response.code_hash != hash256(secret_code) {
                 return Err(anyhow::Error::msg("Invalid secret code"));
             }
             // seller claims ecash through finalize_and_submit txn by overfunding

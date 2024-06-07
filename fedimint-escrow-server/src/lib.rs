@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use anyhow::bail;
 use async_trait::async_trait;
 use fedimint_core::config::{
@@ -242,7 +244,7 @@ impl ServerModule for Escrow {
             seller: output.seller,
             arbiter: output.arbiter,
             amount: output.amount.to_string(),
-            code_hash: code_hash,
+            code_hash,
             state: output.state,
         };
         // is successful? update the entry using operation_id?
@@ -304,16 +306,24 @@ impl ServerModule for Escrow {
 
     // api will be called in client
     fn api_endpoints(&self) -> Vec<ApiEndpoint<Self>> {
-        vec![api_endpoint! {
-            GET_MODULE_INFO,
-            ApiVersion::new(0, 0),
-            async |module: &Escrow, context, request: GetModuleInfoRequest| -> ModuleInfo {
-                module.handle_get_module_info(&mut context.dbtx().into_nc(), &request).await
-            }
-        }]
+        vec![
+            api_endpoint! {
+                GET_MODULE_INFO,
+                ApiVersion::new(0, 0),
+                async |module: &Escrow, context, request: GetModuleInfoRequest| -> ModuleInfo {
+                    module.handle_get_module_info(&mut context.dbtx().into_nc(), &request).await
+                }
+            },
+            api_endpoint! {
+                GET_SECRET_CODE_HASH,
+                ApiVersion::new(0, 0),
+                async |module: &Escrow, context, escrow_id: String| -> Result<SecretCodeHash, EscrowError> {
+                    let request = GetSecretCodeHashRequest { escrow_id };
+                    module.handle_get_secret_code_hash(&mut context.dbtx().into_nc(), &request).await
+                }
+            },
+        ]
     }
-    // more endpoints will be required if the escorw is primarily operated from API
-    // endpoints
 }
 
 impl Escrow {
@@ -341,6 +351,23 @@ impl Escrow {
                 code_hash: value.code_hash,
                 state: value.state,
             }),
+            None => Err(EscrowError::EscrowNotFound),
+        }
+    }
+
+    async fn handle_get_secret_code_hash(
+        &self,
+        dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
+        req: &GetSecretCodeHashRequest,
+    ) -> Result<[u8; 32], EscrowError> {
+        let escrow_value: Option<EscrowValue> = dbtx
+            .get_value(&EscrowKey {
+                escrow_id: req.escrow_id.clone(),
+            })
+            .await?;
+
+        match escrow_value {
+            Some(value) => Ok(value.code_hash),
             None => Err(EscrowError::EscrowNotFound),
         }
     }
