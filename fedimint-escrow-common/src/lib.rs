@@ -27,13 +27,14 @@ pub struct EscrowConsensusItem;
 pub enum EscrowAction {
     Claim,
     Dispute,
+    Retreat,
 }
 
 // Input for a Fedimint transaction
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct EscrowInput {
     pub amount: Amount,
-    pub secret_code: String,
+    pub secret_code: Option<String>,
     pub action: EscrowAction,
 }
 

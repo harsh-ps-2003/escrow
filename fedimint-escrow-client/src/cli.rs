@@ -19,7 +19,7 @@ use crate::api::EscrowFederationApi;
 #[derive(Parser, Serialize)]
 enum Command {
     CreateEscrow {
-        buyer: PublicKey,
+        buyer: PublicKey, // decide on this later, hexadecimal string or bytes ?
         seller: PublicKey,
         arbiter: PublicKey,
         cost: u64, // actual cost of product
@@ -70,20 +70,16 @@ pub(crate) async fn handle_cli_command(
         }
         Command::EscrowInfo { escrow_id } => {
             // get escrow info corresponding to the id from db using federation api
-            let request = GetModuleInfoRequest { escrow_id };
-            // TODO: we need to get the escrow state from the server here, so api endpoint
-            // should use server dbtx
             let response: ModuleInfo = escrow
                 .client_ctx
                 .api()
-                .request(GET_MODULE_INFO, request)
+                .request(GET_MODULE_INFO, escrow_id)
                 .await?;
             Ok(serde_json::to_value(response)?)
         }
         Command::EscrowClaim {
             escrow_id,
             secret_code,
-            amount,
         } => {
             // make an api call to server db and get code hash, and then verify it
             let response: [u8; 32] = escrow
@@ -95,10 +91,12 @@ pub(crate) async fn handle_cli_command(
                 return Err(anyhow::Error::msg("Invalid secret code"));
             }
             // seller claims ecash through finalize_and_submit txn by overfunding
-            escrow.seller_txn(escrow_id, secret_code, amount).await?;
+            escrow
+                .seller_txn(escrow_id, secret_code, response.amount)
+                .await?;
             Ok(json!({
                 "escrow_id": escrow_id,
-                "status": "claimed"
+                "status": "resolved"
             }))
 
             // first handle server side state, then client side!
@@ -108,18 +106,33 @@ pub(crate) async fn handle_cli_command(
             // Call the arbiter and change the state to disputed
             // the arbiter will take a fee (decided off band)
             escrow.initiate_dispute(escrow_id).await?;
+            // initiate_dispute probably shouldn't be a Transaction, but a consensus item
+            // submitted via guardian api endpoint.
             Ok(json!({
                 "escrow_id": escrow_id,
                 "status": "disputed"
             }))
             // out of band notification to arbiter give escrow_id to get the
             // contract detail
-        } // arbiter can tell fed to pay ecash to buyer
+        }
+        Command::EscrowRetreat { escrow_id } => {
+            // buyer can retreat the escrow if the seller doesn't act within a time period!
+            // what should be that time period?
+            let response: ModuleInfo = escrow
+                .client_ctx
+                .api()
+                .request(GET_MODULE_INFO, escrow_id)
+                .await?;
+            escrow.retreat_txn(escrow_id, response.amount).await?;
+            Ok(json!({
+                "escrow_id": escrow_id,
+                "status": "resolved!"
+            }))
+        }
     };
 
-    // arbiter release funds commands
-    // seller should be able to revert back after fixed time if something happens to
-    // the buyer, vice versa
+    // TODO: arbiter release funds commands,  arbiter can tell fed to pay ecash to
+    // buyer
 
     Ok(res)
 }

@@ -212,6 +212,9 @@ impl ServerModule for Escrow {
             EscrowAction::Dispute => {
                 escrow_value.state = EscrowStates::Disputed;
             }
+            EscrowAction::Retreat => {
+                escrow_value.state = EscrowStates::ResolvedWithoutDispute;
+            }
         }
 
         dbtx.insert_entry(&escrow_key, &escrow_value).await?;

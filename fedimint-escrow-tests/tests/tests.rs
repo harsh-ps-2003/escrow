@@ -1,4 +1,4 @@
-// / TODO: Edit the tests after the happy state of module starts working!
+// TODO: Edit the tests after the happy state of module starts working!
 
 // use std::sync::Arc;
 

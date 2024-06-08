@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 // get escrow information in the client side
 pub const GET_MODULE_INFO: &str = "get_module_info";
 
+pub const GET_SECRET_CODE_HASH: &str = "get_secret_code_hash";
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GetModuleInfoRequest {
     pub escrow_id: String,
