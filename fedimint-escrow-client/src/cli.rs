@@ -131,8 +131,7 @@ pub(crate) async fn handle_cli_command(
         }
     };
 
-    // TODO: arbiter release funds commands,  arbiter can tell fed to pay ecash to
+    // TODO: arbiter release funds commands, arbiter can tell fed to pay ecash to
     // buyer
-
     Ok(res)
 }

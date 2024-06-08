@@ -203,9 +203,11 @@ impl ServerModule for Escrow {
             EscrowAction::Claim => match escrow_value.state {
                 EscrowStates::Open => {
                     escrow_value.state = EscrowStates::ResolvedWithoutDispute;
+                    self.delete_escrow_data(dbtx, &escrow_key.escrow_id).await?;
                 }
                 EscrowStates::Disputed => {
                     escrow_value.state = EscrowStates::ResolvedWithDispute;
+                    self.delete_escrow_data(dbtx, &escrow_key.escrow_id).await?;
                 }
                 _ => return Err(anyhow!("Invalid state for claiming escrow").into()),
             },
@@ -214,6 +216,7 @@ impl ServerModule for Escrow {
             }
             EscrowAction::Retreat => {
                 escrow_value.state = EscrowStates::ResolvedWithoutDispute;
+                self.delete_escrow_data(dbtx, &escrow_key.escrow_id).await?;
             }
         }
 
@@ -250,8 +253,7 @@ impl ServerModule for Escrow {
             code_hash,
             state: output.state,
         };
-        // is successful? update the entry using operation_id?
-        // understand how the entry is happening!
+
         // guardian db entry
         dbtx.insert_new_entry(
             &EscrowKey {
@@ -373,5 +375,19 @@ impl Escrow {
             Some(value) => Ok(value.code_hash),
             None => Err(EscrowError::EscrowNotFound),
         }
+    }
+
+    async fn delete_escrow_data(
+        &self,
+        dbtx: &mut DatabaseTransaction<'_>,
+        escrow_id: &str,
+    ) -> Result<(), EscrowError> {
+        let escrow_key = EscrowKey {
+            escrow_id: escrow_id.to_string(),
+        };
+
+        dbtx.remove_entry(&escrow_key).await?;
+
+        Ok(())
     }
 }

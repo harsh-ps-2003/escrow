@@ -201,28 +201,8 @@ impl EscrowClientModule {
     // think how arbiter will initiate dispute with a txn (input only) of its own
     // and change state
     pub async fn initiate_dispute(&self, escrow_id: String) -> anyhow::Result<()> {
-        // Call the arbiter (this could be a network call, a message, etc.)?
-        self.call_arbiter(escrow_id).await?;
-
-        let operation_id = OperationId(thread_rng().gen());
-        // Transfer ecash to arbiter as fee by overfunding the transaction
-        // Create input using the buyer/seller account
-        let input = EscrowInput {
-            amount: arbiter_fee, // will be decided off the band
-            secret_code,
-            action: EscrowAction::Dispute,
-        };
-
-        // Build and send tx to the fed
-        // The transaction builder will create mint output to cover the input amount by
-        // itself
-        let tx = TransactionBuilder::new().with_input(self.client_ctx.make_client_input(input));
-        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (_, change) = self
-            .client_ctx
-            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
-            .await?;
-
+        // TODO : a consensus item submitted via guardian api endpoint? how and why?
+        // can dispute be rejected?
         Ok(())
     }
 
