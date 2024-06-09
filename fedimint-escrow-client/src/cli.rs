@@ -2,6 +2,7 @@ use std::str::FromStr as _;
 use std::{ffi, iter};
 
 use anyhow::Context;
+use chrono::prelude::*;
 use clap::Parser;
 use fedimint_core::Amount;
 use fedimint_escrow_common::config::CODE;
@@ -118,6 +119,11 @@ pub(crate) async fn handle_cli_command(
         Command::EscrowRetreat { escrow_id } => {
             // buyer can retreat the escrow if the seller doesn't act within a time period!
             // what should be that time period?
+            let current_timestamp = chrono::Utc::now().timestamp() as u64;
+            let retreat_delay = 24 * 60 * 60; // 1 day
+            if current_timestamp - response.created_at < retreat_delay {
+                return Err(EscrowError::RetreatTimeNotPassed);
+            }
             let response: ModuleInfo = escrow
                 .client_ctx
                 .api()

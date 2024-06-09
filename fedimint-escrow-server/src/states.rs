@@ -69,9 +69,11 @@ impl IntoDynInstance for EscrowStateMachine {
         DynState::from_typed(instance_id, self)
     }
 }
-// TODO: dont forget to handle errors
+
 #[derive(Error, Debug, Serialize, Deserialize, Encodable, Decodable, Clone, Eq, PartialEq)]
 pub enum EscrowError {
     #[error("Escrow not found")]
     EscrowNotFound,
+    #[error("Retreat time not passed")]
+    RetreatTimeNotPassed,
 }

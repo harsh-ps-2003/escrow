@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use anyhow::bail;
 use async_trait::async_trait;
+use chrono::prelude::*;
 use fedimint_core::config::{
     ConfigGenModuleParams, DkgResult, ServerModuleConfig, ServerModuleConsensusConfig,
     TypedServerModuleConfig, TypedServerModuleConsensusConfig,
@@ -177,6 +178,7 @@ impl ServerModule for Escrow {
     }
 
     // enum of possible transitions for the state
+    // TODO : will use consensus items for dispute!
     async fn process_consensus_item<'a, 'b>(
         &'a self,
         _dbtx: &mut DatabaseTransaction<'b>,
@@ -252,6 +254,8 @@ impl ServerModule for Escrow {
             amount: output.amount.to_string(),
             code_hash,
             state: output.state,
+            created_at: chrono::Utc::now().timestamp() as u64, /* set the timestamp for escrow
+                                                                * creation */
         };
 
         // guardian db entry

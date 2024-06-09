@@ -38,6 +38,7 @@ pub struct EscrowValue {
     pub amount: Amount,
     pub code_hash: [u8; 32],
     pub state: EscrowState,
+    pub created_at: u64,
 }
 
 // Implement database record creation and lookup
