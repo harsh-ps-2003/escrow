@@ -51,11 +51,18 @@ pub(crate) async fn handle_cli_command(
             seller,
             arbiter,
             cost,
+            retreat_duration,
         } => {
             // finalize_and_submit txns to lock ecash by underfunding
             // how to call this method?
             let (operation_id, out_point, escrow_id) = escrow
-                .buyer_txn(Amount::from_sat(cost), buyer, seller, arbiter)
+                .buyer_txn(
+                    Amount::from_sat(cost),
+                    buyer,
+                    seller,
+                    arbiter,
+                    retreat_duration,
+                )
                 .await?;
             // even though unique transaction id will be assigned, escrow id will used to
             // collectively get all data related to the escrow
@@ -118,17 +125,17 @@ pub(crate) async fn handle_cli_command(
         }
         Command::EscrowRetreat { escrow_id } => {
             // buyer can retreat the escrow if the seller doesn't act within a time period!
-            // what should be that time period?
-            let current_timestamp = chrono::Utc::now().timestamp() as u64;
-            let retreat_delay = 24 * 60 * 60; // 1 day
-            if current_timestamp - response.created_at < retreat_delay {
-                return Err(EscrowError::RetreatTimeNotPassed);
-            }
             let response: ModuleInfo = escrow
                 .client_ctx
                 .api()
                 .request(GET_MODULE_INFO, escrow_id)
                 .await?;
+            // what should be that time period?
+            let current_timestamp = chrono::Utc::now().timestamp() as u64;
+            let retreat_duration = response.retreat_duration; // value is set by the buyer while creating the escrow
+            if current_timestamp - response.created_at < retreat_duration {
+                return Err(EscrowError::RetreatTimeNotPassed);
+            }
             escrow.retreat_txn(escrow_id, response.amount).await?;
             Ok(json!({
                 "escrow_id": escrow_id,

@@ -256,6 +256,7 @@ impl ServerModule for Escrow {
             state: output.state,
             created_at: chrono::Utc::now().timestamp() as u64, /* set the timestamp for escrow
                                                                 * creation */
+            retreat_duration: output.retreat_duration,
         };
 
         // guardian db entry
@@ -271,10 +272,8 @@ impl ServerModule for Escrow {
             amount: output.amount,
             fee: self.cfg.consensus.deposit_fee,
         })
-        // store info in db! and share code as escrow input
-        // TODO : not happy buyer claiming the fund back will also need to be
-        // implemented! TODO : signature using public keys of buyer,
-        // seller and arbiter to secure it!
+        // implemented! TODO : signature using public keys of buyer, seller and
+        // arbiter to secure it!
     }
 
     async fn output_status(

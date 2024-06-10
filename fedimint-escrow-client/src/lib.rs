@@ -94,6 +94,7 @@ impl EscrowClientModule {
         buyer: PublicKey,
         seller: PublicKey,
         arbiter: PublicKey,
+        retreat_duration: u64,
     ) -> anyhow::Result<(OperationId, OutPoint)> {
         let operation_id = OperationId(thread_rng().gen());
         let escrow_id = hash256(vec![buyer, seller, arbiter, amount.to_string()].concat()); // create escrow id by hashing buyer, seller, arbiter, amount in a ascending
@@ -106,6 +107,7 @@ impl EscrowClientModule {
             arbiter,
             state: EscrowStates::Open,
             escrow_id,
+            retreat_duration,
         };
 
         // buyer gets statemachine as an asset to track the ecash issued!

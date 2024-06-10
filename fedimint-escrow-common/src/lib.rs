@@ -47,6 +47,7 @@ pub struct EscrowOutput {
     pub arbiter: PublicKey,
     pub state: EscrowState,
     pub escrow_id: String,
+    pub retreat_duration: u64,
 }
 
 /// Errors that might be returned by the server when the buyer awaits guardians
