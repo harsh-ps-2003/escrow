@@ -30,6 +30,7 @@ pub enum EscrowAction {
     Retreat,
 }
 
+// TODO shaurya input should also be an enum with different variants
 // Input for a Fedimint transaction
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct EscrowInput {
@@ -38,14 +39,18 @@ pub struct EscrowInput {
     pub action: EscrowAction,
 }
 
+pub enum EscrowOutput {
+    CreateEscrow(CreateEscrowOutput),
+    ArbiterAction(Action),
+}
+
 // Output for a Fedimint transaction
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct EscrowOutput {
+pub struct CreateEscrowOutput {
     pub amount: Amount,
     pub buyer: PublicKey,
     pub seller: PublicKey,
     pub arbiter: PublicKey,
-    pub state: EscrowState,
     pub escrow_id: String,
     pub retreat_duration: u64,
 }

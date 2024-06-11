@@ -20,6 +20,7 @@ use crate::api::EscrowFederationApi;
 #[derive(Parser, Serialize)]
 enum Command {
     CreateEscrow {
+        // TODO shaurya shouldn't need buyer pubkey here since buyer is submitting TX
         buyer: PublicKey, // decide on this later, hexadecimal string or bytes ?
         seller: PublicKey,
         arbiter: PublicKey,

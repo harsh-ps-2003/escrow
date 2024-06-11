@@ -246,7 +246,13 @@ impl ServerModule for Escrow {
         let escrow_key = EscrowKey {
             uuid: output.escrow_id.to_string(),
         };
+        match output {
+            Creeate => // write to DB with open state
+            Arbiter => // ensure escrow exists, in open state (cannot be any other state)
+        }
         let code_hash = hash256(CODE);
+        // TODO shaurya server should not take client's word for "state"
+        // Output should be of different types, and server should assign state
         let escrow_value = EscrowValue {
             buyer: output.buyer,
             seller: output.seller,
