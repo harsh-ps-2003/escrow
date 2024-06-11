@@ -23,7 +23,8 @@ enum Command {
         buyer: PublicKey, // decide on this later, hexadecimal string or bytes ?
         seller: PublicKey,
         arbiter: PublicKey,
-        cost: u64, // actual cost of product
+        cost: u64,             // actual cost of product
+        retreat_duration: u64, // in seconds
     },
     EscrowInfo {
         escrow_id: String,
@@ -111,11 +112,13 @@ pub(crate) async fn handle_cli_command(
         }
         Command::EscrowDispute { escrow_id, arbiter } => {
             // by buyer and seller both
-            // Call the arbiter and change the state to disputed
+            // Call the arbiter somehow?
             // the arbiter will take a fee (decided off band)
             escrow.initiate_dispute(escrow_id).await?;
-            // initiate_dispute probably shouldn't be a Transaction, but a consensus item
-            // submitted via guardian api endpoint.
+            // initiate_dispute will involve a consensus item
+            // arbiter will call guardian api endpoint with its own keypair creating a
+            // consensus item and change the state to disputed in `process_consensus_item`
+            // and in `process_consensus_item`, the arbiter will claim ecash as fee
             Ok(json!({
                 "escrow_id": escrow_id,
                 "status": "disputed"
@@ -145,6 +148,5 @@ pub(crate) async fn handle_cli_command(
     };
 
     // TODO: arbiter release funds commands, arbiter can tell fed to pay ecash to
-    // buyer
     Ok(res)
 }

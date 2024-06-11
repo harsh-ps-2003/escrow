@@ -186,6 +186,9 @@ impl ServerModule for Escrow {
         _peer_id: PeerId,
     ) -> anyhow::Result<()> {
         bail!("The escrow module does not use consensus items");
+        // consensus item should be created for a dispute
+        // state change here instead of `process_input` for disputes
+        // how will we get seller and buyers keypair for transaction building?
     }
 
     async fn process_input<'a, 'b, 'c>(
@@ -225,16 +228,13 @@ impl ServerModule for Escrow {
         dbtx.insert_entry(&escrow_key, &escrow_value).await?;
         dbtx.commit().await?;
 
-        // todo : understand this?
         Ok(InputMeta {
             amount: TransactionItemAmount {
                 amount: input.amount,
                 fee: self.cfg.consensus.deposit_fee,
             },
-            pub_key: self.key().public_key(), //buyers public key
+            pub_key: self.key().public_key(),
         })
-        // mark delete escrow_id as escrowkey after getting the funds to the
-        // buyer and changing state to resolved!
     }
 
     async fn process_output<'a, 'b>(
