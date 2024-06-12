@@ -177,8 +177,6 @@ impl ServerModule for Escrow {
         Vec::new()
     }
 
-    // enum of possible transitions for the state
-    // TODO : will use consensus items for dispute!
     async fn process_consensus_item<'a, 'b>(
         &'a self,
         _dbtx: &mut DatabaseTransaction<'b>,
@@ -186,9 +184,6 @@ impl ServerModule for Escrow {
         _peer_id: PeerId,
     ) -> anyhow::Result<()> {
         bail!("The escrow module does not use consensus items");
-        // consensus item should be created for a dispute
-        // state change here instead of `process_input` for disputes
-        // how will we get seller and buyers keypair for transaction building?
     }
 
     async fn process_input<'a, 'b, 'c>(
@@ -208,11 +203,9 @@ impl ServerModule for Escrow {
             EscrowAction::Claim => match escrow_value.state {
                 EscrowStates::Open => {
                     escrow_value.state = EscrowStates::ResolvedWithoutDispute;
-                    self.delete_escrow_data(dbtx, &escrow_key.escrow_id).await?;
                 }
                 EscrowStates::Disputed => {
                     escrow_value.state = EscrowStates::ResolvedWithDispute;
-                    self.delete_escrow_data(dbtx, &escrow_key.escrow_id).await?;
                 }
                 _ => return Err(anyhow!("Invalid state for claiming escrow").into()),
             },
@@ -221,7 +214,6 @@ impl ServerModule for Escrow {
             }
             EscrowAction::Retreat => {
                 escrow_value.state = EscrowStates::ResolvedWithoutDispute;
-                self.delete_escrow_data(dbtx, &escrow_key.escrow_id).await?;
             }
         }
 
@@ -231,9 +223,9 @@ impl ServerModule for Escrow {
         Ok(InputMeta {
             amount: TransactionItemAmount {
                 amount: input.amount,
-                fee: self.cfg.consensus.deposit_fee,
+                fee: Amount::ZERO,
             },
-            pub_key: self.key().public_key(),
+            pub_key: self.key(), // sellers public key! the one who is getting the money!
         })
     }
 
@@ -378,19 +370,5 @@ impl Escrow {
             Some(value) => Ok(value.code_hash),
             None => Err(EscrowError::EscrowNotFound),
         }
-    }
-
-    async fn delete_escrow_data(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        escrow_id: &str,
-    ) -> Result<(), EscrowError> {
-        let escrow_key = EscrowKey {
-            escrow_id: escrow_id.to_string(),
-        };
-
-        dbtx.remove_entry(&escrow_key).await?;
-
-        Ok(())
     }
 }
