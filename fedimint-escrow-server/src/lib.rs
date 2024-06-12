@@ -245,7 +245,7 @@ impl ServerModule for Escrow {
             arbiter: output.arbiter,
             amount: output.amount.to_string(),
             code_hash,
-            state: output.state,
+            state: EscrowStates::Open,
             created_at: chrono::Utc::now().timestamp() as u64, /* set the timestamp for escrow
                                                                 * creation */
             retreat_duration: output.retreat_duration,

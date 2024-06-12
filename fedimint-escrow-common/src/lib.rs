@@ -45,7 +45,6 @@ pub struct EscrowOutput {
     pub buyer: PublicKey,
     pub seller: PublicKey,
     pub arbiter: PublicKey,
-    pub state: EscrowState,
     pub escrow_id: String,
     pub retreat_duration: u64,
 }

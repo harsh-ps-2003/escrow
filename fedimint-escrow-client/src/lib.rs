@@ -104,7 +104,6 @@ impl EscrowClientModule {
             buyer: self.key.public_key(),
             seller,
             arbiter,
-            state: EscrowStates::Open,
             escrow_id,
             retreat_duration,
         };
