@@ -20,8 +20,7 @@ use crate::api::EscrowFederationApi;
 #[derive(Parser, Serialize)]
 enum Command {
     CreateEscrow {
-        buyer: PublicKey, // decide on this later, hexadecimal string or bytes ?
-        seller: PublicKey,
+        seller: PublicKey, // decide on this later, hexadecimal string or bytes ?
         arbiter: PublicKey,
         cost: u64,             // actual cost of product
         retreat_duration: u64, // in seconds
@@ -48,7 +47,6 @@ pub(crate) async fn handle_cli_command(
 
     let res = match command {
         Command::CreateEscrow {
-            buyer,
             seller,
             arbiter,
             cost,
@@ -57,18 +55,11 @@ pub(crate) async fn handle_cli_command(
             // finalize_and_submit txns to lock ecash by underfunding
             // how to call this method?
             let (operation_id, out_point, escrow_id) = escrow
-                .buyer_txn(
-                    Amount::from_sat(cost),
-                    buyer,
-                    seller,
-                    arbiter,
-                    retreat_duration,
-                )
+                .buyer_txn(Amount::from_sat(cost), seller, arbiter, retreat_duration)
                 .await?;
             // even though unique transaction id will be assigned, escrow id will used to
             // collectively get all data related to the escrow
-            pub const CODE: String =
-                hash256((vec![buyer, seller, arbiter, cost].concat()).reverse());
+            pub const CODE: String = hash256((vec![seller, arbiter, cost].concat()).reverse());
             // If transaction is accepted and state is opened in server, share escrow ID and
             // CODE
             Ok(json!({
@@ -96,8 +87,11 @@ pub(crate) async fn handle_cli_command(
                 .api()
                 .request(GET_SECRET_CODE_HASH, escrow_id)
                 .await?;
+            if response.state == EscrowStates::Disputed {
+                return Err(EscrowError::EscrowDisputed);
+            }
             if response.code_hash != hash256(secret_code) {
-                return Err(anyhow::Error::msg("Invalid secret code"));
+                return Err(EscrowError::InvalidSecretCode);
             }
             // seller claims ecash through finalize_and_submit txn by overfunding
             escrow
@@ -110,15 +104,14 @@ pub(crate) async fn handle_cli_command(
 
             // first handle server side state, then client side!
         }
-        Command::EscrowDispute { escrow_id, arbiter } => {
-            // by buyer and seller both
-            // Call the arbiter somehow?
+        Command::EscrowDispute {
+            escrow_id,
+            arbiter,
+            arbiter_fee,
+        } => {
             // the arbiter will take a fee (decided off band)
-            escrow.initiate_dispute(escrow_id).await?;
-            // initiate_dispute will involve a consensus item
-            // arbiter will call guardian api endpoint with its own keypair creating a
-            // consensus item and change the state to disputed in `process_consensus_item`
-            // and in `process_consensus_item`, the arbiter will claim ecash as fee
+            escrow.initiate_dispute(escrow_id, arbiter_fee).await?;
+
             Ok(json!({
                 "escrow_id": escrow_id,
                 "status": "disputed"
@@ -133,9 +126,11 @@ pub(crate) async fn handle_cli_command(
                 .api()
                 .request(GET_MODULE_INFO, escrow_id)
                 .await?;
-            // what should be that time period?
+            if response.state == EscrowStates::Disputed {
+                return Err(EscrowError::EscrowDisputed);
+            }
             let current_timestamp = chrono::Utc::now().timestamp() as u64;
-            let retreat_duration = response.retreat_duration; // value is set by the buyer while creating the escrow
+            let retreat_duration = response.retreat_duration; // time duration is set by the buyer while creating the escrow
             if current_timestamp - response.created_at < retreat_duration {
                 return Err(EscrowError::RetreatTimeNotPassed);
             }

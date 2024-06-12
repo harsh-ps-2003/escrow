@@ -76,4 +76,8 @@ pub enum EscrowError {
     EscrowNotFound,
     #[error("Retreat time not passed")]
     RetreatTimeNotPassed,
+    #[error("Escrow is disputed and cannot be claimed")]
+    EscrowDisputed,
+    #[error("Invalid secret code")]
+    InvalidSecretCode,
 }

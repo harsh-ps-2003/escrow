@@ -91,18 +91,17 @@ impl EscrowClientModule {
     pub async fn buyer_txn(
         &self,
         amount: Amount,
-        buyer: PublicKey,
         seller: PublicKey,
         arbiter: PublicKey,
         retreat_duration: u64,
     ) -> anyhow::Result<(OperationId, OutPoint)> {
         let operation_id = OperationId(thread_rng().gen());
-        let escrow_id = hash256(vec![buyer, seller, arbiter, amount.to_string()].concat()); // create escrow id by hashing buyer, seller, arbiter, amount in a ascending
-                                                                                            // order
+        let escrow_id = hash256(vec![seller, arbiter, amount.to_string()].concat()); // create escrow id by hashing buyer, seller, arbiter, amount in a ascending
+                                                                                     // order
 
         let output = EscrowOutput {
             amount,
-            buyer,
+            buyer: self.key.public_key(),
             seller,
             arbiter,
             state: EscrowStates::Open,
@@ -202,9 +201,36 @@ impl EscrowClientModule {
 
     // think how arbiter will initiate dispute with a txn (input only) of its own
     // and change state
-    pub async fn initiate_dispute(&self, escrow_id: String) -> anyhow::Result<()> {
-        // TODO : a consensus item submitted via guardian api endpoint? how and why?
-        // can dispute be rejected?
+    pub async fn initiate_dispute(
+        &self,
+        escrow_id: String,
+        arbiter_fee: Amount,
+    ) -> anyhow::Result<()> {
+        let operation_id = OperationId(thread_rng().gen());
+        // Transfer ecash back to buyer by underfunding the transaction
+        let input = EscrowInput {
+            amount: arbiter_fee,
+            secret_code: None,
+            action: EscrowAction::Dispute,
+        };
+
+        // Build and send tx to the fed
+        // The transaction builder will create mint output to cover the input amount by
+        // itself
+        let tx = TransactionBuilder::new().with_input(self.client_ctx.make_client_input(input));
+        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
+        let (_, change) = self
+            .client_ctx
+            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
+            .await?;
+
+        let tx_subscription = self.client_ctx.transaction_updates(op_id).await;
+
+        tx_subscription
+            .await_tx_accepted(txid)
+            .await
+            .map_err(|e| anyhow!(e))?;
+
         Ok(())
     }
 
