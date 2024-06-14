@@ -36,6 +36,7 @@ pub struct EscrowInput {
     pub amount: Amount,
     pub secret_code: Option<String>,
     pub action: EscrowAction,
+    pub arbiter_state: Option<String>,
 }
 
 // Output for a Fedimint transaction

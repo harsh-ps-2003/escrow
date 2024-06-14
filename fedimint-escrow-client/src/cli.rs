@@ -90,6 +90,9 @@ pub(crate) async fn handle_cli_command(
             if response.state == EscrowStates::Disputed {
                 return Err(EscrowError::EscrowDisputed);
             }
+            if response.state != EscrowState::WaitingforSeller || EscrowState::Open {
+                return Err(EscrowError::ArbiterNotDecided);
+            }
             if response.code_hash != hash256(secret_code) {
                 return Err(EscrowError::InvalidSecretCode);
             }
@@ -106,7 +109,6 @@ pub(crate) async fn handle_cli_command(
         }
         Command::EscrowDispute {
             escrow_id,
-            arbiter,
             arbiter_fee,
         } => {
             // the arbiter will take a fee (decided off band)
@@ -121,6 +123,8 @@ pub(crate) async fn handle_cli_command(
         }
         Command::EscrowRetreat { escrow_id } => {
             // buyer can retreat the escrow if the seller doesn't act within a time period!
+            // also when the arbiter decides the ecash should be given to buyer, this
+            // command would be used!
             let response: ModuleInfo = escrow
                 .client_ctx
                 .api()
@@ -129,6 +133,11 @@ pub(crate) async fn handle_cli_command(
             if response.state == EscrowStates::Disputed {
                 return Err(EscrowError::EscrowDisputed);
             }
+            if response.state != EscrowState::WaitingforBuyer || EscrowState::Open {
+                return Err(EscrowError::ArbiterNotDecided);
+            }
+            // the state should be waiting for buyer to claim the ecash as arbiter has
+            // decided
             let current_timestamp = chrono::Utc::now().timestamp() as u64;
             let retreat_duration = response.retreat_duration; // time duration is set by the buyer while creating the escrow
             if current_timestamp - response.created_at < retreat_duration {
@@ -140,8 +149,38 @@ pub(crate) async fn handle_cli_command(
                 "status": "resolved!"
             }))
         }
+        Command::EscrowArbiterDecision {
+            escrow_id,
+            decision,
+        } => {
+            // arbiter will decide the ecash should be given to buyer or seller and change
+            // the state of escrow!
+            let response: ModuleInfo = escrow
+                .client_ctx
+                .api()
+                .request(GET_MODULE_INFO, escrow_id)
+                .await?;
+            if response.state != EscrowStates::Disputed {
+                return Err(EscrowError::EscrowNotDisputed);
+            }
+            if response.arbiter != self.key().public_key() {
+                return Err(EscrowError::ArbiterNotMatched);
+            }
+            // the arbiter can act only after the time decided by the buyer has passed
+            let current_timestamp = chrono::Utc::now().timestamp() as u64;
+            let retreat_duration = response.retreat_duration; // time duration is set by the buyer while creating the escrow
+            if current_timestamp - response.created_at < retreat_duration {
+                return Err(EscrowError::RetreatTimeNotPassed);
+            }
+            // the arbiter will take a fee (decided off band)
+            // decision has 2 values, buyer or seller.
+            escrow.arbiter_txn(escrow_id, decision).await?;
+            Ok(json!({
+                "escrow_id": escrow_id,
+                "status": "resolved!"
+            }))
+        }
     };
 
-    // TODO: arbiter release funds commands, arbiter can tell fed to pay ecash to
     Ok(res)
 }

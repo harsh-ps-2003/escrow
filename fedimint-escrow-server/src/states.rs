@@ -22,6 +22,8 @@ pub enum EscrowStates {
     ResolvedWithoutDispute,
     ResolvedWithDispute,
     Disputed,
+    WaitingforBuyer,
+    WaitingforSeller,
 }
 
 impl State for EscrowStateMachine {
@@ -80,4 +82,10 @@ pub enum EscrowError {
     EscrowDisputed,
     #[error("Invalid secret code")]
     InvalidSecretCode,
+    #[error("Escrow is not disputed, thus arbiter cannot decide the ecash to be given to buyer or seller")]
+    EscrowNotDisputed,
+    #[error("You are not the Arbiter!")]
+    ArbiterNotMatched,
+    #[error("Arbiter has not decided the ecash to be given to buyer or seller yet!")]
+    ArbiterNotDecided,
 }

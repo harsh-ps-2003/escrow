@@ -209,9 +209,17 @@ impl ServerModule for Escrow {
                 }
                 _ => return Err(anyhow!("Invalid state for claiming escrow").into()),
             },
-            EscrowAction::Dispute => {
-                escrow_value.state = EscrowStates::Disputed;
-            }
+            EscrowAction::Dispute => match escrow_value.state {
+                EscrowStates::Open => {
+                    escrow_value.state = EscrowStates::Disputed;
+                }
+                EscrowStates::Disputed => match input.arbiter_state.as_ref() {
+                    Some("buyer") => escrow_value.state = EscrowStates::WaitingforBuyer,
+                    Some("seller") => escrow_value.state = EscrowStates::WaitingforSeller,
+                    _ => return Err(anyhow!("Invalid arbiter state").into()),
+                },
+                _ => return Err(anyhow!("Invalid state for initiating dispute").into()),
+            },
             EscrowAction::Retreat => {
                 escrow_value.state = EscrowStates::ResolvedWithoutDispute;
             }
@@ -225,7 +233,8 @@ impl ServerModule for Escrow {
                 amount: input.amount,
                 fee: Amount::ZERO,
             },
-            pub_key: self.key(), // sellers public key! the one who is getting the money!
+            pub_key: self.key().public_key(), /* sellers public key! the one who is getting the
+                                               * money! */
         })
     }
 

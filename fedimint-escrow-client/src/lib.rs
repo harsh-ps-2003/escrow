@@ -147,6 +147,7 @@ impl EscrowClientModule {
             amount,
             secret_code: Some(secret_code),
             action: EscrowAction::Claim,
+            arbiter_state: None,
         };
 
         // Build and send tx to the fed
@@ -176,6 +177,7 @@ impl EscrowClientModule {
             amount,
             secret_code: None,
             action: EscrowAction::Retreat,
+            arbiter_state: None,
         };
 
         // Build and send tx to the fed
@@ -198,8 +200,6 @@ impl EscrowClientModule {
         Ok(())
     }
 
-    // think how arbiter will initiate dispute with a txn (input only) of its own
-    // and change state
     pub async fn initiate_dispute(
         &self,
         escrow_id: String,
@@ -211,6 +211,37 @@ impl EscrowClientModule {
             amount: arbiter_fee,
             secret_code: None,
             action: EscrowAction::Dispute,
+            arbiter_state: None,
+        };
+
+        // Build and send tx to the fed
+        // The transaction builder will create mint output to cover the input amount by
+        // itself
+        let tx = TransactionBuilder::new().with_input(self.client_ctx.make_client_input(input));
+        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
+        let (_, change) = self
+            .client_ctx
+            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
+            .await?;
+
+        let tx_subscription = self.client_ctx.transaction_updates(op_id).await;
+
+        tx_subscription
+            .await_tx_accepted(txid)
+            .await
+            .map_err(|e| anyhow!(e))?;
+
+        Ok(())
+    }
+
+    pub async fn arbiter_txn(&self, escrow_id: String, decision: String) -> anyhow::Result<()> {
+        let operation_id = OperationId(thread_rng().gen());
+        // Transfer ecash back to buyer by underfunding the transaction
+        let input = EscrowInput {
+            amount: Amount::ZERO,
+            secret_code: None,
+            action: EscrowAction::Dispute,
+            arbiter_state: Some(decision),
         };
 
         // Build and send tx to the fed
