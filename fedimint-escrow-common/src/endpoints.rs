@@ -5,11 +5,7 @@ pub const GET_MODULE_INFO: &str = "get_module_info";
 
 pub const GET_SECRET_CODE_HASH: &str = "get_secret_code_hash";
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetModuleInfoRequest {
-    pub escrow_id: String,
-}
-
+/// ModuleInfo is the response to the GET_MODULE_INFO request
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleInfo {
     pub buyer: PublicKey,

@@ -30,7 +30,7 @@ pub enum EscrowAction {
     Retreat,
 }
 
-// Input for a Fedimint transaction
+/// The input for the escrow module
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct EscrowInput {
     pub amount: Amount,
@@ -39,7 +39,7 @@ pub struct EscrowInput {
     pub arbiter_state: Option<String>,
 }
 
-// Output for a Fedimint transaction
+/// The output for the escrow module
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct EscrowOutput {
     pub amount: Amount,
@@ -70,9 +70,10 @@ plugin_types_trait_impl_common!(
     EscrowOutput,
     EscrowConsensusItem,
     EscrowInputError,
-    EscrowOutputError
+    EscrowOutputError,
 );
 
+/// The common initializer for the escrow module
 #[derive(Debug)]
 pub struct EscrowCommonInit;
 
@@ -105,6 +106,7 @@ impl fmt::Display for EscrowOutput {
     }
 }
 
+/// Hashes the value using SHA256
 pub fn hash256(value: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(value.as_bytes());

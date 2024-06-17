@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::db::EscrowKey;
 
-/// Tracks a escrow
+/// The state machine for the escrow module
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum EscrowStateMachine {
     Open(escrow_id),
@@ -16,6 +16,7 @@ pub enum EscrowStateMachine {
     Disputed(escrow_id),
 }
 
+/// The states for the escrow module
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum EscrowStates {
     Open,
@@ -72,6 +73,7 @@ impl IntoDynInstance for EscrowStateMachine {
     }
 }
 
+/// The errors for the escrow module
 #[derive(Error, Debug, Serialize, Deserialize, Encodable, Decodable, Clone, Eq, PartialEq)]
 pub enum EscrowError {
     #[error("Escrow not found")]

@@ -28,7 +28,7 @@ use fedimint_escrow_common::config::{
 use fedimint_escrow_common::{
     broken_fed_public_key, fed_public_key, hash256, ApiError, EscrowCommonInit,
     EscrowConsensusItem, EscrowInput, EscrowInputError, EscrowModuleTypes, EscrowOutput,
-    EscrowOutputError, GetModuleInfoRequest, ModuleInfo, CONSENSUS_VERSION,
+    EscrowOutputError, ModuleInfo, CONSENSUS_VERSION,
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
 use sha2::{Digest, Sha256};
@@ -157,7 +157,7 @@ impl ServerModuleInit for EscrowInit {
     }
 }
 
-/// escrow module
+/// The escrow module
 #[derive(Debug)]
 pub struct Escrow {
     pub cfg: EscrowConfig,
@@ -319,16 +319,15 @@ impl ServerModule for Escrow {
             api_endpoint! {
                 GET_MODULE_INFO,
                 ApiVersion::new(0, 0),
-                async |module: &Escrow, context, request: GetModuleInfoRequest| -> ModuleInfo {
-                    module.handle_get_module_info(&mut context.dbtx().into_nc(), &request).await
+                async |module: &Escrow, context, escrow_id: String| -> ModuleInfo {
+                    module.handle_get_module_info(&mut context.dbtx().into_nc(), escrow_id).await
                 }
             },
             api_endpoint! {
                 GET_SECRET_CODE_HASH,
                 ApiVersion::new(0, 0),
-                async |module: &Escrow, context, escrow_id: String| -> Result<SecretCodeHash, EscrowError> {
-                    let request = GetSecretCodeHashRequest { escrow_id };
-                    module.handle_get_secret_code_hash(&mut context.dbtx().into_nc(), &request).await
+                async |module: &Escrow, context, escrow_id: String| -> Result<[u8; 32], EscrowError> {
+                    module.handle_get_secret_code_hash(&mut context.dbtx().into_nc(), escrow_id).await
                 }
             },
         ]
@@ -344,13 +343,9 @@ impl Escrow {
     async fn handle_get_module_info(
         &self,
         dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
-        req: &GetModuleInfoRequest,
+        escrow_id: String,
     ) -> Result<ModuleInfo, ApiError> {
-        let escrow_value: Option<EscrowValue> = dbtx
-            .get_value(&EscrowKey {
-                escrow_id: req.escrow_id,
-            })
-            .await?;
+        let escrow_value: Option<EscrowValue> = dbtx.get_value(&EscrowKey { escrow_id }).await?;
         match escrow_value {
             Some(value) => Ok(ModuleInfo {
                 buyer: value.buyer,
@@ -367,13 +362,9 @@ impl Escrow {
     async fn handle_get_secret_code_hash(
         &self,
         dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
-        req: &GetSecretCodeHashRequest,
+        escrow_id: String,
     ) -> Result<[u8; 32], EscrowError> {
-        let escrow_value: Option<EscrowValue> = dbtx
-            .get_value(&EscrowKey {
-                escrow_id: req.escrow_id.clone(),
-            })
-            .await?;
+        let escrow_value: Option<EscrowValue> = dbtx.get_value(&EscrowKey { escrow_id }).await?;
 
         match escrow_value {
             Some(value) => Ok(value.code_hash),

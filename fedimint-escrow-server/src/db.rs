@@ -10,7 +10,7 @@ use strum_macros::EnumIter;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-// Define the key prefix for the database
+/// The key prefix for the database
 #[repr(u8)]
 #[derive(Clone, Debug, EnumIter)]
 pub enum DbKeyPrefix {
@@ -23,13 +23,13 @@ impl std::fmt::Display for DbKeyPrefix {
     }
 }
 
-// Define the key structure using a UUID
+/// The key structure using a UUID
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash)]
 pub struct EscrowKey {
     pub escrow_id: String,
 }
 
-// Define the value structure for the database record
+/// The structure for the database record
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EscrowValue {
     pub buyer: PublicKey,
@@ -41,7 +41,7 @@ pub struct EscrowValue {
     pub created_at: u64,
 }
 
-// Implement database record creation and lookup
+/// Implement database record creation and lookup
 impl_db_record!(
     key = EscrowKey,
     value = EscrowValue,

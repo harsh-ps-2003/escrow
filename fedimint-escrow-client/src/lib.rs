@@ -21,6 +21,7 @@ use crate::cli::CODE;
 #[cfg(feature = "cli")]
 pub mod cli;
 
+/// The escrow client module
 #[derive(Debug)]
 pub struct EscrowClientModule {
     cfg: EscrowClientConfig,
@@ -30,7 +31,7 @@ pub struct EscrowClientModule {
     db: Database,
 }
 
-/// Data needed by the state machine
+/// Data needed by the state machine as context
 #[derive(Debug, Clone)]
 pub struct EscrowClientContext {
     pub escrow_decoder: Decoder,
@@ -87,7 +88,8 @@ impl ClientModule for EscrowClientModule {
 }
 
 impl EscrowClientModule {
-    // attach ecash to the transaction and submit it to federation
+    /// Handles the buyer transaction and sends the transaction to the
+    /// federation for CreateEscrow command
     pub async fn buyer_txn(
         &self,
         amount: Amount,
@@ -134,6 +136,8 @@ impl EscrowClientModule {
     // code should not work when arbiter is not involved!
     // when arbiter involved, 2 txns are involved!
 
+    /// Handles the seller transaction and sends the transaction to the
+    /// federation for EscrowClaim command
     pub async fn seller_txn(
         &self,
         escrow_id: String,
@@ -170,6 +174,8 @@ impl EscrowClientModule {
         Ok(())
     }
 
+    /// Handles the retreat transaction and sends the transaction to the
+    /// federation for EscrowRetreat command
     pub async fn retreat_txn(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
         // Transfer ecash back to buyer by underfunding the transaction
@@ -200,6 +206,8 @@ impl EscrowClientModule {
         Ok(())
     }
 
+    /// Handles the initiate dispute transaction and sends the transaction to
+    /// the federation for EscrowDispute command
     pub async fn initiate_dispute(
         &self,
         escrow_id: String,
@@ -234,6 +242,8 @@ impl EscrowClientModule {
         Ok(())
     }
 
+    /// Handles the arbiter transaction and sends the transaction to the
+    /// federation for EscrowArbiterDecision command
     pub async fn arbiter_txn(&self, escrow_id: String, decision: String) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
         // Transfer ecash back to buyer by underfunding the transaction
@@ -279,6 +289,7 @@ impl EscrowClientModule {
     // }
 }
 
+/// The escrow client module initializer
 #[derive(Debug, Clone)]
 pub struct EscrowClientInit;
 

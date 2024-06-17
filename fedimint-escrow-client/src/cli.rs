@@ -38,6 +38,7 @@ enum Command {
     },
 }
 
+/// Handles the CLI command for the escrow module
 pub(crate) async fn handle_cli_command(
     escrow: &EscrowClientModule,
     args: &[ffi::OsString],
