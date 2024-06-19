@@ -5,8 +5,10 @@ use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
 use fedimint_core::{plugin_types_trait_impl_common, Amount};
-use secp256k1::{KeyPair, PublicKey};
+use hex;
+use secp256k1::PublicKey;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 // Common contains types shared by both the client and server
@@ -24,6 +26,7 @@ pub const CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion::ne
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct EscrowConsensusItem;
 
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub enum EscrowAction {
     Claim,
     Dispute,
@@ -113,26 +116,3 @@ pub fn hash256(value: &str) -> String {
     let result = hasher.finalize();
     hex::encode(result)
 }
-
-// /// A special key that creates assets for a test/example
-// const FED_SECRET_PHRASE: &str = "Money printer go brrr...........";
-
-// const BROKEN_FED_SECRET_PHRASE: &str = "Money printer go <boom>........!";
-
-// pub fn fed_public_key() -> PublicKey {
-//     fed_key_pair().public_key()
-// }
-
-// pub fn fed_key_pair() -> KeyPair {
-//     KeyPair::from_seckey_slice(&Secp256k1::new(),
-// FED_SECRET_PHRASE.as_bytes()).expect("32 bytes") }
-
-// pub fn broken_fed_public_key() -> PublicKey {
-//     broken_fed_key_pair().public_key()
-// }
-
-// // Like fed, but with a broken accounting
-// pub fn broken_fed_key_pair() -> KeyPair {
-//     KeyPair::from_seckey_slice(&Secp256k1::new(),
-// BROKEN_FED_SECRET_PHRASE.as_bytes())         .expect("32 bytes")
-// }

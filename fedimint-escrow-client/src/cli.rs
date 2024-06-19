@@ -6,6 +6,7 @@ use chrono::prelude::*;
 use clap::Parser;
 use fedimint_core::Amount;
 use fedimint_escrow_common::config::CODE;
+use fedimint_escrow_common::endpoints::ModuleInfo;
 use secp256k1::PublicKey;
 use serde::Serialize;
 use serde_json::json;
@@ -76,7 +77,14 @@ pub(crate) async fn handle_cli_command(
                 .api()
                 .request(GET_MODULE_INFO, escrow_id)
                 .await?;
-            Ok(serde_json::to_value(response)?)
+            Ok(json!({
+                "buyer": response.buyer,
+                "seller": response.seller,
+                "arbiter": response.arbiter,
+                "amount": response.amount,
+                "state": response.state,
+                // code_hash is intentionally omitted to not expose it in the response
+            }))
         }
         Command::EscrowClaim {
             escrow_id,

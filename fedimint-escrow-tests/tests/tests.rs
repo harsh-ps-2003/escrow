@@ -1,147 +1,260 @@
 // TODO: Edit the tests after the happy state of module starts working!
 
-// use std::sync::Arc;
+use std::sync::Arc;
 
-// use anyhow::bail;
-// use fedimint_client::transaction::{ClientInput, ClientOutput,
-// TransactionBuilder}; use fedimint_core::config::ClientModuleConfig;
-// use fedimint_core::core::{IntoDynInstance, ModuleKind, OperationId};
-// use fedimint_core::db::mem_impl::MemDatabase;
-// use fedimint_core::module::ModuleConsensusVersion;
-// use fedimint_core::{sats, Amount, OutPoint};
-// use fedimint_escrow_client::states::EscrowStateMachine;
-// use fedimint_escrow_client::{EscrowClientInit, EscrowClientModule};
-// use fedimint_escrow_common::config::{EscrowClientConfig, EscrowGenParams};
-// use fedimint_escrow_common::{broken_fed_key_pair, EscrowInput, EscrowOutput,
-// KIND}; use fedimint_escrow_server::EscrowInit;
-// use fedimint_testing::fixtures::Fixtures;
-// use secp256k1::Secp256k1;
+use anyhow::bail;
+use fedimint_client::transaction::{ClientInput, ClientOutput, TransactionBuilder};
+use fedimint_core::config::ClientModuleConfig;
+use fedimint_core::core::{IntoDynInstance, ModuleKind, OperationId};
+use fedimint_core::db::mem_impl::MemDatabase;
+use fedimint_core::module::ModuleConsensusVersion;
+use fedimint_core::{sats, Amount, OutPoint};
+use fedimint_escrow_client::states::EscrowStateMachine;
+use fedimint_escrow_client::{EscrowClientInit, EscrowClientModule};
+use fedimint_escrow_common::config::{EscrowClientConfig, EscrowGenParams};
+use fedimint_escrow_common::{EscrowInput, EscrowOutput, KIND};
+use fedimint_escrow_server::EscrowInit;
+use fedimint_testing::fixtures::Fixtures;
+use secp256k1::Secp256k1;
 
-// fn fixtures() -> Fixtures {
-//     Fixtures::new_primary(EscrowClientInit, EscrowInit,
-// EscrowGenParams::default()) }
+fn fixtures() -> Fixtures {
+    Fixtures::new_primary(EscrowClientInit, EscrowInit, EscrowGenParams::default())
+}
 
-// #[tokio::test(flavor = "multi_thread")]
-// async fn can_print_and_send_money() -> anyhow::Result<()> {
-//     let fed = fixtures().new_fed().await;
-//     let (client1, client2) = fed.two_clients().await;
+async fn setup_test_env() -> anyhow::Result<(
+    Client,
+    Client,
+    Client,
+    EscrowClientModule,
+    EscrowClientModule,
+)> {
+    let fed = fixtures().new_fed().await;
+    let (buyer, seller) = fed.two_clients().await;
+    let arbiter = fed.new_client().await;
 
-//     let client1_escrow_module =
-// client1.get_first_module::<EscrowClientModule>();
-//     let client2_escrow_module =
-// client2.get_first_module::<EscrowClientModule>();     let (_, outpoint) =
-// client1_escrow_module.print_money(sats(1000)).await?;
-//     client1_escrow_module.receive_money(outpoint).await?;
-//     assert_eq!(client1.get_balance().await, sats(1000));
+    // when buyer needs to interact with escrow
+    let buyer_escrow = buyer.get_first_module::<EscrowClientModule>();
+    // when seller needs to interact with escrow
+    let seller_escrow = seller.get_first_module::<EscrowClientModule>();
+    // when arbiter needs to interact with escrow
+    let arbiter_escrow = arbiter.get_first_module::<EscrowClientModule>();
 
-//     let outpoint = client1_escrow_module
-//         .send_money(client2_escrow_module.account(), sats(250))
-//         .await?;
-//     client2_escrow_module.receive_money(outpoint).await?;
-//     assert_eq!(client1.get_balance().await, sats(750));
-//     assert_eq!(client2.get_balance().await, sats(250));
-//     Ok(())
-// }
+    // Fund the buyer with 1100 sats
+    buyer.fund(sats(1100)).await?;
 
-// #[tokio::test(flavor = "multi_thread")]
-// async fn client_ignores_unknown_module() {
-//     let fed = fixtures().new_fed().await;
-//     let client = fed.new_client().await;
+    // buyer creates escrow
+    let (op_id, outpoint, escrow_id) = buyer_escrow
+        .buyer_txn(
+            Amount::sats(1000),
+            seller.public_key(),
+            arbiter.public_key(),
+            3600, // 1 hour retreat duration
+        )
+        .await?;
 
-//     let mut cfg = client.get_config().clone();
-//     let module_id = 2142;
-//     let extra_mod = ClientModuleConfig::from_typed(
-//         module_id,
-//         ModuleKind::from_static_str("unknown_module"),
-//         ModuleConsensusVersion::new(0, 0),
-//         EscrowClientConfig {
-//             tx_fee: Amount::from_sats(1),
-//         },
-//     )
-//     .unwrap();
-//     cfg.modules.insert(2142, extra_mod);
+    Ok((
+        buyer,
+        seller,
+        arbiter,
+        buyer_escrow,
+        seller_escrow,
+        arbiter_escrow,
+        escrow_id,
+    ))
+}
 
-//     let db = MemDatabase::new().into();
-//     // Test that building the client worked
-//     let _client = fed.new_client_with(cfg, db).await;
-// }
+#[tokio::test(flavor = "multi_thread")]
+async fn get_module_info_returns_expected() -> anyhow::Result<()> {
+    let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow, escrow_id) =
+        setup_test_env().await?;
 
-// #[tokio::test(flavor = "multi_thread")]
-// async fn federation_should_abort_if_balance_sheet_is_negative() ->
-// anyhow::Result<()> {     let fed = fixtures().new_fed().await;
-//     let client = fed.new_client().await;
+    // Prepare arguments for the EscrowInfo command
+    let args = vec![
+        ffi::OsString::from("EscrowInfo"),
+        ffi::OsString::from(escrow_id.clone()),
+    ];
 
-//     let (panic_sender, panic_receiver) = std::sync::mpsc::channel::<()>();
-//     let prev_panic_hook = std::panic::take_hook();
-//     std::panic::set_hook(Box::new(move |info| {
-//         let panic_str = info.to_string();
-//         if panic_str
-//             .contains("Balance sheet of the fed has gone negative, this
-// should never happen!")         {
-//             // The first panic may lead to the receiver being dropped, so we
-// have to swallow             // the error here
-//             let _ = panic_sender.send(());
-//         }
+    // Call the handle_cli_command function from cli.rs
+    let response = handle_cli_command(&buyer_escrow, &args).await?;
 
-//         prev_panic_hook(info);
-//     }));
+    // expected JSON response
+    let expected_json = json!({
+        "buyer": buyer.public_key().to_string(),
+        "seller": seller.public_key().to_string(),
+        "arbiter": arbiter.public_key().to_string(),
+        "escrow_id": escrow_id,
+        "status": "open", // Assuming the status is 'open' initially
+        "amount": amount,
+        "retreat_duration": 3600
+    });
 
-//     let Escrow = client.get_first_module::<EscrowClientModule>();
-//     let op_id = OperationId(rand::random());
-//     let account_kp = broken_fed_key_pair();
-//     let input = ClientInput {
-//         input: EscrowInput {
-//             amount: sats(1000),
-//         },
-//         keys: vec![account_kp],
-//         state_machines: Arc::new(move |_, _|
-// Vec::<EscrowStateMachine>::new()),     };
+    // Assert that the response matches the expected JSON
+    assert_eq!(response, expected_json);
 
-//     let tx = TransactionBuilder::new().with_input(input.into_dyn(Escrow.id));
-//     let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-//     client
-//         .finalize_and_submit_transaction(op_id, KIND.as_str(), outpoint, tx)
-//         .await?;
+    Ok(())
+}
 
-//     // Make sure we panicked with the right message
-//     panic_receiver.recv().expect("Sender not dropped");
+#[tokio::test(flavor = "multi_thread")]
+async fn can_create_and_claim_escrow_in_happy_state() -> anyhow::Result<()> {
+    let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow, escrow_id) =
+        setup_test_env().await?;
 
-//     Ok(())
-// }
+    // Seller claims escrow with secret code
+    let secret_code: String = "secret123".to_string();
+    seller_escrow
+        .seller_txn(escrow_id, secret_code, amount)
+        .await?;
 
-// /// A proper transaction is balanced, which means the sum of its inputs and
-// /// outputs are the same.
-// /// In this case we create a transaction with zero inputs and one output,
-// which /// the federation should reject because it's unbalanced.
-// #[tokio::test(flavor = "multi_thread")]
-// async fn unbalanced_transactions_get_rejected() -> anyhow::Result<()> {
-//     let fed = fixtures().new_fed().await;
-//     let client = fed.new_client().await;
+    // Check balances
+    assert_eq!(buyer.get_balance().await, Amount::ZERO);
+    assert_eq!(seller.get_balance().await, sats(1000));
 
-//     let escrow_module = client.get_first_module::<EscrowClientModule>();
-//     let output = ClientOutput {
-//         output: EscrowOutput {
-//             amount: sats(1000),
-//             account: escrow_module.account(),
-//         },
-//         state_machines: Arc::new(move |_, _|
-// Vec::<EscrowStateMachine>::new()),     };
-//     let tx =
-// TransactionBuilder::new().with_output(output.into_dyn(escrow_module.id));
-//     let (tx, _) = tx.build(&Secp256k1::new(), rand::thread_rng());
-//     let result = client.api().submit_transaction(tx).await;
-//     match result {
-//         Ok(submission_result) => {
-//             if submission_result
-//                 .try_into_inner(client.decoders())
-//                 .unwrap()
-//                 .is_ok()
-//             {
-//                 bail!("Should have been rejected")
-//             }
-//         }
-//         Err(e) => bail!("Submission unsuccessful: {}", e),
-//     }
+    Ok(())
+}
 
-//     Ok(())
-// }
+#[tokio::test(flavor = "multi_thread")]
+async fn can_dispute_and_resolve_escrow_in_favor_of_buyer() -> anyhow::Result<()> {
+    let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow, escrow_id) =
+        setup_test_env().await?;
+
+    // Buyer disputes escrow
+    buyer_escrow.initiate_dispute(escrow_id, sats(100)).await?;
+
+    // Arbiter resolves dispute in favor of buyer
+    arbiter_escrow.arbiter_txn(escrow_id, "buyer").await?;
+
+    // Buyer retreats funds but paid arbiter from his pocket
+    buyer_escrow.retreat_txn(escrow_id, sats(900)).await?;
+
+    // Check balances
+    assert_eq!(buyer.get_balance().await, sats(900)); // minus arbiter fee
+    assert_eq!(seller.get_balance().await, Amount::ZERO);
+    assert_eq!(arbiter.get_balance().await, sats(100));
+
+    Ok(())
+}
+
+// buyer disputed the escrow but seller won!
+#[tokio::test(flavor = "multi_thread")]
+async fn can_dispute_and_resolve_escrow_in_favor_of_seller() -> anyhow::Result<()> {
+    let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow, escrow_id) =
+        setup_test_env().await?;
+
+    // Buyer disputes escrow
+    buyer_escrow.initiate_dispute(escrow_id, sats(100)).await?;
+
+    // Arbiter resolves dispute in favor of buyer
+    arbiter_escrow.arbiter_txn(escrow_id, "seller").await?;
+
+    // Seller claims disputed funds
+    seller_escrow
+        .seller_txn(escrow_id, secret_code, sats(900))
+        .await?;
+
+    // Check balances
+    assert_eq!(buyer.get_balance().await, Amount::ZERO); // minus arbiter fee
+    assert_eq!(seller.get_balance().await, sats(1000));
+    assert_eq!(arbiter.get_balance().await, sats(100));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retreat_fails_before_time_passed() -> anyhow::Result<()> {
+    let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow, escrow_id) =
+        setup_test_env().await?;
+
+    // Buyer tries to retreat before retreat duration has passed
+    let res = buyer_escrow.buyer_retreat(escrow_id).await;
+
+    // Check it returns RetreatTimeNotPassed error
+    assert!(matches!(res, Err(EscrowError::RetreatTimeNotPassed)));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn invalid_secret_code_fails_claim() -> anyhow::Result<()> {
+    let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow, escrow_id) =
+        setup_test_env().await?;
+
+    // Seller tries to claim with invalid secret code
+    let invalid_code: String = "wrong_secret".to_string();
+    let res = seller_escrow
+        .seller_txn(escrow_id, invalid_code, amount)
+        .await;
+
+    // Check that it returns InvalidSecretCode error
+    assert!(matches!(res, Err(EscrowError::InvalidSecretCode)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn claim_fails_when_disputed() -> anyhow::Result<()> {
+    let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow, escrow_id) =
+        setup_test_env().await?;
+
+    // Buyer disputes escrow
+    buyer_escrow.initiate_dispute(escrow_id, sats(100)).await?;
+
+    // Seller tries to claim
+    let res = seller_escrow
+        .seller_txn(escrow_id, secret_code, amount)
+        .await;
+
+    // Check it returns EscrowDisputed error
+    assert!(matches!(res, Err(EscrowError::EscrowDisputed)));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn non_arbiter_cannot_resolve() -> anyhow::Result<()> {
+    let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow, escrow_id) =
+        setup_test_env().await?;
+
+    // Dispute the escrow
+    seller_escrow.seller_dispute(escrow_id).await?;
+
+    // Non-arbiter client tries to resolve
+    let non_arbiter = fed.new_client().await;
+    let res = non_arbiter
+        .get_first_module::<EscrowClientModule>()
+        .arbiter_resolve(escrow_id, seller.public_key())
+        .await;
+
+    // Check it returns ArbiterNotMatched error
+    assert!(matches!(res, Err(EscrowError::ArbiterNotMatched)));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cannot_retreat_before_arbiter_resolves() -> anyhow::Result<()> {
+    let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow, escrow_id) =
+        setup_test_env().await?;
+
+    // Dispute the escrow
+    seller_escrow.seller_dispute(escrow_id).await?;
+
+    // Buyer tries to retreat before arbiter resolves
+    let res = buyer_escrow.buyer_retreat(escrow_id).await;
+
+    // Check it returns ArbiterNotDecided error
+    assert!(matches!(res, Err(EscrowError::ArbiterNotDecided)));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn arbiter_decision_fails_when_not_disputed() -> anyhow::Result<()> {
+    let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow, escrow_id) =
+        setup_test_env().await?;
+
+    // Attempt to make an arbiter decision when no dispute has been raised
+    let res = arbiter_escrow.arbiter_txn(escrow_id, "buyer").await;
+
+    // Check it returns EscrowNotDisputed error
+    assert!(matches!(res, Err(EscrowError::EscrowNotDisputed)));
+
+    Ok(())
+}

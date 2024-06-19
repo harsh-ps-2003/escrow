@@ -1,4 +1,4 @@
-use fedimint_core::core::ModuleKind;
+use fedimint_core::core::ClientConfig;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::{plugin_types_trait_impl_config, Amount};
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,8 @@ pub struct EscrowClientConfig {
     /// Accessible to clients
     pub deposit_fee: Amount,
 }
+
+impl ClientConfig for EscrowClientConfig {}
 
 /// Locally unencrypted config unique to each member
 #[derive(Clone, Debug, Serialize, Deserialize, Decodable, Encodable)]

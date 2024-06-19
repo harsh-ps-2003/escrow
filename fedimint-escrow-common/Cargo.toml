@@ -22,6 +22,8 @@ futures = { workspace = true }
 fedimint-core ={ workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
+sha2 = "0.10.8"
+hex = "0.4.3"
 secp256k1 = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
