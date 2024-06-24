@@ -1,5 +1,3 @@
-// TODO: Edit the tests after the happy state of module starts working!
-
 use std::sync::Arc;
 
 use anyhow::bail;
@@ -44,7 +42,7 @@ async fn setup_test_env() -> anyhow::Result<(
 
     // buyer creates escrow
     let (op_id, outpoint, escrow_id) = buyer_escrow
-        .buyer_txn(
+        .create_escrow(
             Amount::sats(1000),
             seller.public_key(),
             arbiter.public_key(),

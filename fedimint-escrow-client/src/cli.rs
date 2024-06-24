@@ -15,12 +15,10 @@ use sha2::{Digest, Sha256};
 use super::EscrowClientModule;
 use crate::api::EscrowFederationApi;
 
-// make sure you are sending clone of things, not references or direct sending!
-
 // TODO: we need cli-commands as well as API endpoints for these commands!
 #[derive(Parser, Serialize)]
 enum Command {
-    CreateEscrow {
+    escrow {
         seller: PublicKey, // decide on this later, hexadecimal string or bytes ?
         arbiter: PublicKey,
         cost: u64,             // actual cost of product
@@ -48,25 +46,35 @@ pub(crate) async fn handle_cli_command(
         Command::parse_from(iter::once(&ffi::OsString::from("escrow")).chain(args.iter()));
 
     let res = match command {
-        Command::CreateEscrow {
-            seller,
-            arbiter,
+        Command::Escrow {
+            seller_pubkey,
+            arbiter_pubkey,
             cost,
             retreat_duration,
         } => {
             // finalize_and_submit txns to lock ecash by underfunding
-            // how to call this method?
             let (operation_id, out_point, escrow_id) = escrow
-                .buyer_txn(Amount::from_sat(cost), seller, arbiter, retreat_duration)
+                .create_escrow(
+                    Amount::from_sat(cost),
+                    seller_pubkey,
+                    arbiter_pubkey,
+                    retreat_duration,
+                )
                 .await?;
-            // even though unique transaction id will be assigned, escrow id will used to
-            // collectively get all data related to the escrow
-            pub const CODE: String = hash256((vec![seller, arbiter, cost].concat()).reverse());
+
+            // Generate the secret code by hashing seller, arbiter and cost in reverse order
+            let code = hash256(
+                format!("{}{}{}", seller_pubkey, arbiter_pubkey, cost)
+                    .chars()
+                    .rev()
+                    .collect::<String>(),
+            );
+
             // If transaction is accepted and state is opened in server, share escrow ID and
             // CODE
             Ok(json!({
-                "secret-code": CODE, // shared by buyer out of band to seller
-                "escrow-id": escrow_id,
+                "secret-code": code, // shared by buyer out of band to seller
+                "escrow-id": escrow_id, // even though unique transaction id will be assigned, escrow id will used to collectively get all data related to the escrow
                 "state": "escrow opened!"
             }))
         }
@@ -78,9 +86,9 @@ pub(crate) async fn handle_cli_command(
                 .request(GET_MODULE_INFO, escrow_id)
                 .await?;
             Ok(json!({
-                "buyer": response.buyer,
-                "seller": response.seller,
-                "arbiter": response.arbiter,
+                "buyer_pubkey": response.buyer_pubkey,
+                "seller_pubkey": response.seller_pubkey,
+                "arbiter_pubkey": response.arbiter_pubkey,
                 "amount": response.amount,
                 "state": response.state,
                 // code_hash is intentionally omitted to not expose it in the response

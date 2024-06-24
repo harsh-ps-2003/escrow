@@ -32,9 +32,9 @@ pub struct EscrowKey {
 /// The structure for the database record
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EscrowValue {
-    pub buyer: PublicKey,
-    pub seller: PublicKey,
-    pub arbiter: PublicKey,
+    pub buyer_pubkey: PublicKey,
+    pub seller_pubkey: PublicKey,
+    pub arbiter_pubkey: PublicKey,
     pub amount: Amount,
     pub code_hash: [u8; 32],
     pub state: EscrowState,

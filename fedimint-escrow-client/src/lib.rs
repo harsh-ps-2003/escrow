@@ -89,23 +89,24 @@ impl ClientModule for EscrowClientModule {
 
 impl EscrowClientModule {
     /// Handles the buyer transaction and sends the transaction to the
-    /// federation for CreateEscrow command
-    pub async fn buyer_txn(
+    /// federation for escrow command
+    pub async fn create_escrow(
         &self,
         amount: Amount,
-        seller: PublicKey,
-        arbiter: PublicKey,
+        seller_pubkey: PublicKey,
+        arbiter_pubkey: PublicKey,
         retreat_duration: u64,
     ) -> anyhow::Result<(OperationId, OutPoint)> {
         let operation_id = OperationId(thread_rng().gen());
-        let escrow_id = hash256(vec![seller, arbiter, amount.to_string()].concat()); // create escrow id by hashing buyer, seller, arbiter, amount in a ascending
-                                                                                     // order
+
+        // Create escrow id by hashing seller, arbiter, amount
+        let escrow_id = hash256(format!("{}{}{}", seller, arbiter, amount));
 
         let output = EscrowOutput {
             amount,
-            buyer: self.key.public_key(),
-            seller,
-            arbiter,
+            buyer_pubkey: self.key.public_key(),
+            seller_pubkey,
+            arbiter_pubkey,
             escrow_id,
             retreat_duration,
         };
@@ -131,10 +132,6 @@ impl EscrowClientModule {
 
         Ok((operation_id, change[0], escrow_id))
     }
-
-    // dont involve consensus until necessary
-    // code should not work when arbiter is not involved!
-    // when arbiter involved, 2 txns are involved!
 
     /// Handles the seller transaction and sends the transaction to the
     /// federation for EscrowClaim command

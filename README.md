@@ -4,9 +4,9 @@ The Escrow module of the Fedimint system facilitates secure transactions between
 
 ## CLI Commands
 
-### 1. CreateEscrow
+### 1. Escrow
 
-`fedimint-cli createescrow [ARBITER_PUBLIC_KEY] [COST_OF_PRODUCT] [RETREAT_DURATION]`
+`fedimint-cli escrow [ARBITER_PUBLIC_KEY] [COST_OF_PRODUCT] [RETREAT_DURATION]`
 
 This command initiates an escrow transaction. It requires details about the arbiter, cost of the products, and the retreat duration (time limit for the transaction, after which the buyer can retreat the escrow if the seller hasn't acted).
 
@@ -58,7 +58,7 @@ The decision can either be in the favour of `buyer` or the `seller`, whosoever w
 
 ```mermaid
 graph TD
-    A[Buyer] -->|Creates Escrow| B[CreateEscrow]
+    A[Buyer] -->|Creates Escrow| B[Escrow]
     B --> C[Escrow OPENED]
     C --> D[SECRET_CODE and ESCROW_ID]
     D -->|Shares SECRET_CODE with Seller| E[Seller]

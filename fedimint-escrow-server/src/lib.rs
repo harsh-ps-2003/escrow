@@ -247,13 +247,18 @@ impl ServerModule for Escrow {
         let escrow_key = EscrowKey {
             uuid: output.escrow_id.to_string(),
         };
-        let code_hash = hash256(CODE);
+        let secret_code_hash = hash256(hash256(
+            format!("{}{}{}", output.seller, output.arbiter, output.amount)
+                .chars()
+                .rev()
+                .collect::<String>(),
+        ));
         let escrow_value = EscrowValue {
-            buyer: output.buyer,
-            seller: output.seller,
-            arbiter: output.arbiter,
+            buyer_pubkey: output.buyer_pubkey,
+            seller_pubkey: output.seller_pubkey,
+            arbiter_pubkey: output.arbiter_pubkey,
             amount: output.amount.to_string(),
-            code_hash,
+            secret_code_hash,
             state: EscrowStates::Open,
             created_at: chrono::Utc::now().timestamp() as u64, /* set the timestamp for escrow
                                                                 * creation */
@@ -348,11 +353,11 @@ impl Escrow {
         let escrow_value: Option<EscrowValue> = dbtx.get_value(&EscrowKey { escrow_id }).await?;
         match escrow_value {
             Some(value) => Ok(ModuleInfo {
-                buyer: value.buyer,
-                seller: value.seller,
-                arbiter: value.arbiter,
+                buyer_pubkey: value.buyer_pubkey,
+                seller_pubkey: value.seller_pubkey,
+                arbiter_pubkey: value.arbiter_pubkey,
                 amount: value.amount,
-                code_hash: value.code_hash,
+                secret_code_hash: value.secret_code_hash,
                 state: value.state,
             }),
             None => Err(EscrowError::EscrowNotFound),
@@ -367,7 +372,7 @@ impl Escrow {
         let escrow_value: Option<EscrowValue> = dbtx.get_value(&EscrowKey { escrow_id }).await?;
 
         match escrow_value {
-            Some(value) => Ok(value.code_hash),
+            Some(value) => Ok(value.secret_code_hash),
             None => Err(EscrowError::EscrowNotFound),
         }
     }

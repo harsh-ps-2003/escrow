@@ -46,9 +46,9 @@ pub struct EscrowInput {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct EscrowOutput {
     pub amount: Amount,
-    pub buyer: PublicKey,
-    pub seller: PublicKey,
-    pub arbiter: PublicKey,
+    pub buyer_pubkey: PublicKey,
+    pub seller_pubkey: PublicKey,
+    pub arbiter_pubkey: PublicKey,
     pub escrow_id: String,
     pub retreat_duration: u64,
 }
@@ -110,7 +110,7 @@ impl fmt::Display for EscrowOutput {
 }
 
 /// Hashes the value using SHA256
-pub fn hash256(value: &str) -> String {
+pub fn hash256(value: String) -> String {
     let mut hasher = Sha256::new();
     hasher.update(value.as_bytes());
     let result = hasher.finalize();
