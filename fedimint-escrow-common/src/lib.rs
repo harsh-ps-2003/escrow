@@ -1,3 +1,5 @@
+pub mod endpoints;
+
 use std::fmt;
 
 use config::EscrowClientConfig;
@@ -25,6 +27,12 @@ pub const CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion::ne
 /// other than this we are not proposing any changes.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct EscrowConsensusItem;
+
+impl std::fmt::Display for EscrowConsensusItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EscrowConsensusItem")
+    }
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub enum EscrowAction {
@@ -61,9 +69,17 @@ pub enum EscrowInputError {}
 /// Errors that might be returned by the server
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
 pub enum EscrowOutputError {}
-
 /// Contains the types defined above
 pub struct EscrowModuleTypes;
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
+pub enum EscrowOutputOutcome {}
+
+impl std::fmt::Display for EscrowOutputOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unimplemented!()
+    }
+}
 
 // Wire together the types for this module
 plugin_types_trait_impl_common!(
@@ -74,6 +90,7 @@ plugin_types_trait_impl_common!(
     EscrowConsensusItem,
     EscrowInputError,
     EscrowOutputError,
+    EscrowOutputOutcome
 );
 
 /// The common initializer for the escrow module

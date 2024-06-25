@@ -1,14 +1,15 @@
-use fedimint_client::sm::DynState;
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::{DatabaseTransaction, DatabaseValue, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::registry::ModuleDecoderRegistry;
+use fedimint_core::sm::DynState;
 use fedimint_core::{impl_db_record, Amount};
-use fedimint_escrow_common::Nonce;
 use secp256k1::PublicKey;
-use strum_macros::EnumIter;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use strum_macros::EnumIter;
+
+use super::states::EscrowStates;
 
 /// The key prefix for the database
 #[repr(u8)]
@@ -37,8 +38,9 @@ pub struct EscrowValue {
     pub arbiter_pubkey: PublicKey,
     pub amount: Amount,
     pub code_hash: [u8; 32],
-    pub state: EscrowState,
+    pub state: EscrowStates,
     pub created_at: u64,
+    pub retreat_duration: u64,
 }
 
 /// Implement database record creation and lookup

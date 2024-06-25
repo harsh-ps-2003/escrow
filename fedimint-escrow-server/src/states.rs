@@ -1,7 +1,7 @@
-use fedimint_client::sm::{DynState, State, StateTransition};
-use fedimint_client::DynGlobalClientContext;
 use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, OperationId};
 use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::sm::{DynState, State, StateTransition};
+use fedimint_core::{DynGlobalClientContext, TransactionId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -10,10 +10,10 @@ use crate::db::EscrowKey;
 /// The state machine for the escrow module
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum EscrowStateMachine {
-    Open(escrow_id),
-    ResolvedWithoutDispute(escrow_id), // arbiter gets no fee
-    ResolvedWithDispute(escrow_id), // arbiter gets the fee
-    Disputed(escrow_id),
+    Open(String, TransactionId),
+    ResolvedWithoutDispute(String, TransactionId), // arbiter gets no fee
+    ResolvedWithDispute(String, TransactionId),    // arbiter gets the fee
+    Disputed(String, TransactionId),
 }
 
 /// The states for the escrow module
@@ -39,27 +39,28 @@ impl State for EscrowStateMachine {
         // when the transaction by buyer is successful, state is open
 
         match self.clone() {
-            EscrowStateMachine::Open(escrow_id) => vec![StateTransition::new(
-                await_tx_accepted(global_context.clone(), txid),
-                move |dbtx, res, _state: Self| match res {
-                    // client writes in own db, that txn completed after server side has already written it!
-                    Ok(_) => Box::pin(async move { EscrowStateMachine::ResolvedWithoutDispute(escrow_id) }),
-                    Err(_) => Box::pin(async move { EscrowStateMachine::Disputed(escrow_id) }),
-                },
+            EscrowStateMachine::Open(escrow_id, txid) => vec![StateTransition::new(
+                // await_tx_accepted(global_context.clone(), txid),
+                // move |dbtx, res, _state: Self| match res {
+                //     // client writes in own db, that txn completed after server side has already written it!
+                //     Ok(_) => Box::pin(async move { EscrowStateMachine::ResolvedWithoutDispute(escrow_id, txid) }),
+                //     Err(_) => Box::pin(async move { EscrowStateMachine::Disputed(escrow_id, txid) }),
+                // },
             )],
-            EscrowStateMachine::ResolvedWithoutDispute(escrow_id) => vec![],
-            EscrowStateMachine::ResolvedWithDispute(escrow_id) => vec![],
-            EscrowStateMachine::Disputed(escrow_id) => vec![],
+            EscrowStateMachine::ResolvedWithoutDispute(escrow_id, txid) => vec![],
+            EscrowStateMachine::ResolvedWithDispute(escrow_id, txid) => vec![],
+            EscrowStateMachine::Disputed(escrow_id, txid) => vec![],
         }
     }
 
-    // TODO: escrow_id shouldnt be mapped to operation_id as as escrow_id is going to remain same, while for each transaction operation_id will differ
+    // TODO: escrow_id shouldn't be mapped to operation_id as as escrow_id is going
+    // to remain same, while for each transaction operation_id will differ
     fn operation_id(&self) -> OperationId {
         match self {
-            EscrowStateMachine::Open(escrow_id) => *escrow_id,
-            EscrowStateMachine::ResolvedWithoutDispute(escrow_id) => *escrow_id,
-            EscrowStateMachine::ResolvedWithDispute(escrow_id) => *escrow_id,
-            EscrowStateMachine::Disputed(escrow_id) => *escrow_id,
+            EscrowStateMachine::Open(escrow_id, txid) => *txid,
+            EscrowStateMachine::ResolvedWithoutDispute(escrow_id, txid) => *txid,
+            EscrowStateMachine::ResolvedWithDispute(escrow_id, txid) => *txid,
+            EscrowStateMachine::Disputed(escrow_id, txid) => *txid,
         }
     }
 }
@@ -90,4 +91,10 @@ pub enum EscrowError {
     ArbiterNotMatched,
     #[error("Arbiter has not decided the ecash to be given to buyer or seller yet!")]
     ArbiterNotDecided,
+    #[error("Invalid arbiter state")]
+    InvalidArbiterState,
+    #[error("Invalid state for initiating dispute")]
+    InvalidStateForInitiatingDispute,
+    #[error("Invalid state for claiming escrow")]
+    InvalidStateForClaimingEscrow,
 }

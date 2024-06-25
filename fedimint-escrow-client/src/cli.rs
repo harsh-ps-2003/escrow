@@ -5,8 +5,7 @@ use anyhow::Context;
 use chrono::prelude::*;
 use clap::Parser;
 use fedimint_core::Amount;
-use fedimint_escrow_common::config::CODE;
-use fedimint_escrow_common::endpoints::ModuleInfo;
+use fedimint_escrow_server::ModuleInfo;
 use secp256k1::PublicKey;
 use serde::Serialize;
 use serde_json::json;
@@ -52,13 +51,17 @@ pub(crate) async fn handle_cli_command(
             cost,
             retreat_duration,
         } => {
+            // Create escrow id by hashing seller, arbiter, amount
+            let escrow_id = hash256(format!("{}{}{}", seller_pubkey, arbiter_pubkey, amount));
+
             // finalize_and_submit txns to lock ecash by underfunding
-            let (operation_id, out_point, escrow_id) = escrow
+            let (operation_id, out_point) = escrow
                 .create_escrow(
                     Amount::from_sat(cost),
                     seller_pubkey,
                     arbiter_pubkey,
                     retreat_duration,
+                    escrow_id.clone(),
                 )
                 .await?;
 
@@ -115,7 +118,7 @@ pub(crate) async fn handle_cli_command(
             }
             // seller claims ecash through finalize_and_submit txn by overfunding
             escrow
-                .seller_txn(escrow_id, secret_code, response.amount)
+                .claim_escrow(escrow_id, secret_code, response.amount)
                 .await?;
             Ok(json!({
                 "escrow_id": escrow_id,
@@ -160,7 +163,7 @@ pub(crate) async fn handle_cli_command(
             if current_timestamp - response.created_at < retreat_duration {
                 return Err(EscrowError::RetreatTimeNotPassed);
             }
-            escrow.retreat_txn(escrow_id, response.amount).await?;
+            escrow.escrow_retreat(escrow_id, response.amount).await?;
             Ok(json!({
                 "escrow_id": escrow_id,
                 "status": "resolved!"

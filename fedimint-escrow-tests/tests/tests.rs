@@ -41,7 +41,7 @@ async fn setup_test_env() -> anyhow::Result<(
     buyer.fund(sats(1100)).await?;
 
     // buyer creates escrow
-    let (op_id, outpoint, escrow_id) = buyer_escrow
+    let (operation_id, outpoint, escrow_id) = buyer_escrow
         .create_escrow(
             Amount::sats(1000),
             seller.public_key(),
@@ -100,7 +100,7 @@ async fn can_create_and_claim_escrow_in_happy_state() -> anyhow::Result<()> {
     // Seller claims escrow with secret code
     let secret_code: String = "secret123".to_string();
     seller_escrow
-        .seller_txn(escrow_id, secret_code, amount)
+        .claim_escrow(escrow_id, secret_code, amount)
         .await?;
 
     // Check balances
@@ -122,7 +122,7 @@ async fn can_dispute_and_resolve_escrow_in_favor_of_buyer() -> anyhow::Result<()
     arbiter_escrow.arbiter_txn(escrow_id, "buyer").await?;
 
     // Buyer retreats funds but paid arbiter from his pocket
-    buyer_escrow.retreat_txn(escrow_id, sats(900)).await?;
+    buyer_escrow.escrow_retreat(escrow_id, sats(900)).await?;
 
     // Check balances
     assert_eq!(buyer.get_balance().await, sats(900)); // minus arbiter fee
@@ -146,7 +146,7 @@ async fn can_dispute_and_resolve_escrow_in_favor_of_seller() -> anyhow::Result<(
 
     // Seller claims disputed funds
     seller_escrow
-        .seller_txn(escrow_id, secret_code, sats(900))
+        .claim_escrow(escrow_id, secret_code, sats(900))
         .await?;
 
     // Check balances
@@ -179,7 +179,7 @@ async fn invalid_secret_code_fails_claim() -> anyhow::Result<()> {
     // Seller tries to claim with invalid secret code
     let invalid_code: String = "wrong_secret".to_string();
     let res = seller_escrow
-        .seller_txn(escrow_id, invalid_code, amount)
+        .claim_escrow(escrow_id, invalid_code, amount)
         .await;
 
     // Check that it returns InvalidSecretCode error
@@ -196,7 +196,7 @@ async fn claim_fails_when_disputed() -> anyhow::Result<()> {
 
     // Seller tries to claim
     let res = seller_escrow
-        .seller_txn(escrow_id, secret_code, amount)
+        .claim_escrow(escrow_id, secret_code, amount)
         .await;
 
     // Check it returns EscrowDisputed error
