@@ -21,7 +21,7 @@ enum Command {
     escrow {
         seller: PublicKey, // decide on this later, hexadecimal string or bytes ?
         arbiter: PublicKey,
-        cost: u64,             // actual cost of product
+        cost: Amount,          // actual cost of product
         retreat_duration: u64, // in seconds
     },
     EscrowInfo {
@@ -33,7 +33,7 @@ enum Command {
     },
     EscrowDispute {
         escrow_id: String,
-        arbiter: PublicKey,
+        arbiter_fee: Amount,
     },
 }
 
@@ -53,7 +53,7 @@ pub(crate) async fn handle_cli_command(
             retreat_duration,
         } => {
             // Create escrow id by hashing seller, arbiter, amount
-            let escrow_id = hash256(format!("{}{}{}", seller_pubkey, arbiter_pubkey, amount));
+            let escrow_id = hash256(format!("{}{}{}", seller_pubkey, arbiter_pubkey, cost));
 
             // finalize_and_submit txns to lock ecash by underfunding
             let (operation_id, out_point) = escrow

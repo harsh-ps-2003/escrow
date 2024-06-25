@@ -40,13 +40,16 @@ async fn setup_test_env() -> anyhow::Result<(
     // Fund the buyer with 1100 sats
     buyer.fund(sats(1100)).await?;
 
+    let escrow_id = "escrow_id".to_string();
+
     // buyer creates escrow
-    let (operation_id, outpoint, escrow_id) = buyer_escrow
+    let (operation_id, outpoint) = buyer_escrow
         .create_escrow(
             Amount::sats(1000),
             seller.public_key(),
             arbiter.public_key(),
             3600, // 1 hour retreat duration
+            escrow_id,
         )
         .await?;
 
@@ -80,7 +83,7 @@ async fn get_module_info_returns_expected() -> anyhow::Result<()> {
         "buyer": buyer.public_key().to_string(),
         "seller": seller.public_key().to_string(),
         "arbiter": arbiter.public_key().to_string(),
-        "escrow_id": escrow_id,
+        "escrow_id": "escrow_id".to_string(),
         "status": "open", // Assuming the status is 'open' initially
         "amount": amount,
         "retreat_duration": 3600
@@ -98,7 +101,7 @@ async fn can_create_and_claim_escrow_in_happy_state() -> anyhow::Result<()> {
         setup_test_env().await?;
 
     // Seller claims escrow with secret code
-    let secret_code: String = "secret123".to_string();
+    let secret_code: String = "secret_code".to_string();
     seller_escrow
         .claim_escrow(escrow_id, secret_code, amount)
         .await?;
