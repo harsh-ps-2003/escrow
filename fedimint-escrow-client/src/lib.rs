@@ -122,6 +122,11 @@ impl EscrowClientModule {
 
         let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
 
+        // shaurya: follow the pattern of a non-blocking function to start the operation, along with a subscribe_ style function
+        // to keep tabs on the state of the operation. See for example spend_notes_oob and subscribe_spend_notes_oob in 
+        // https://github.com/fedimint/fedimint/blob/994739c3efe0890caed5741e2b126352dc02635f/modules/fedimint-mint-client/src/lib.rs#L1596
+        // The states for us would be simple: Created, Accepted or Rejected
+
         tx_subscription
             .await_tx_accepted(txid)
             .await
@@ -132,6 +137,7 @@ impl EscrowClientModule {
 
     /// Handles the seller transaction and sends the transaction to the
     /// federation for EscrowClaim command
+    // Handles the seller transaction to claim the funds that are locked in the escrow upon providing the secret
     pub async fn claim_escrow(
         &self,
         escrow_id: String,
@@ -160,6 +166,10 @@ impl EscrowClientModule {
 
         let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
 
+        // shaurya: follow the pattern of a non-blocking function to start the operation, along with a subscribe_ style function
+        // to keep tabs on the state of the operation. See for example spend_notes_oob and subscribe_spend_notes_oob in 
+        // https://github.com/fedimint/fedimint/blob/994739c3efe0890caed5741e2b126352dc02635f/modules/fedimint-mint-client/src/lib.rs#L1596
+        // The states for us would be simple: Created, Accepted or Rejected
         tx_subscription
             .await_tx_accepted(txid)
             .await
@@ -170,6 +180,8 @@ impl EscrowClientModule {
 
     /// Handles the retreat transaction and sends the transaction to the
     /// federation for EscrowRetreat command
+    // not sure what the purpose is of this "retreat" functionality.. if there is some edge case that merits this,
+    // let's come to that later
     pub async fn escrow_retreat(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
         // Transfer ecash back to buyer by underfunding the transaction
@@ -202,6 +214,13 @@ impl EscrowClientModule {
 
     /// Handles the initiate dispute transaction and sends the transaction to
     /// the federation for EscrowDispute command
+    // shaurya: might be good to record who is calling the dispute?
+
+    // when buyer creates escrow ->, buyer supplies max arbiter fee in basis points (10 to 1000 limited by consensus config)
+    // example, buyer decides 500 BPs which is 5%
+    // case 1: arbiter gets involved, but can resolve quickly, arbiter chooses 2%
+    // case 2: arbiter gets involved, needs a lot of time + effort to resolve, arbiter chooses 5% max
+    // in this case, arbiter's fee is taken from the funds in the escrow at the time of arbiter's decision using the BPS supplied by the arbiter
     pub async fn initiate_dispute(
         &self,
         escrow_id: String,
@@ -228,6 +247,11 @@ impl EscrowClientModule {
 
         let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
 
+        // shaurya: follow the pattern of a non-blocking function to start the operation, along with a subscribe_ style function
+        // to keep tabs on the state of the operation. See for example spend_notes_oob and subscribe_spend_notes_oob in 
+        // https://github.com/fedimint/fedimint/blob/994739c3efe0890caed5741e2b126352dc02635f/modules/fedimint-mint-client/src/lib.rs#L1596
+        // The states for us would be simple: Created, Accepted or Rejected
+
         tx_subscription
             .await_tx_accepted(txid)
             .await
@@ -245,6 +269,7 @@ impl EscrowClientModule {
             amount: Amount::ZERO,
             secret_code: None,
             action: EscrowAction::Dispute,
+            // avoid string-like states when they can be encoded into types
             arbiter_state: Some(decision),
         };
 
@@ -260,6 +285,11 @@ impl EscrowClientModule {
 
         let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
 
+        // shaurya: follow the pattern of a non-blocking function to start the operation, along with a subscribe_ style function
+        // to keep tabs on the state of the operation. See for example spend_notes_oob and subscribe_spend_notes_oob in 
+        // https://github.com/fedimint/fedimint/blob/994739c3efe0890caed5741e2b126352dc02635f/modules/fedimint-mint-client/src/lib.rs#L1596
+        // The states for us would be simple: Created, Accepted or Rejected
+
         tx_subscription
             .await_tx_accepted(txid)
             .await
@@ -267,6 +297,8 @@ impl EscrowClientModule {
 
         Ok(())
     }
+
+    // add new functions for buyer or seller to claim the funds once the arbiter has decided in favor of either and the state on the server is waitingforbuyer/seller
 
     // /// Request the federation prints money for us for using in test
     // pub async fn print_money(&self, amount: Amount) ->

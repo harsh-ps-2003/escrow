@@ -212,9 +212,11 @@ impl ServerModule for Escrow {
         match input.action {
             EscrowAction::Claim => match escrow_value.state {
                 EscrowStates::Open => {
+                    // CHECK THE SECRET!!!
                     escrow_value.state = EscrowStates::ResolvedWithoutDispute;
                 }
                 EscrowStates::Disputed => {
+                    // why are we allowing claiming when state is disputed
                     escrow_value.state = EscrowStates::ResolvedWithDispute;
                 }
                 _ => return Err(EscrowError::InvalidStateForClaimingEscrow),
@@ -224,6 +226,7 @@ impl ServerModule for Escrow {
                     escrow_value.state = EscrowStates::Disputed;
                 }
                 EscrowStates::Disputed => match input.arbiter_state.as_ref() {
+                    // CHECK SIGNATURE for arbiter, include it in the Input enum variant designed for Arbiter
                     Some("buyer") => escrow_value.state = EscrowStates::WaitingforBuyer,
                     Some("seller") => escrow_value.state = EscrowStates::WaitingforSeller,
                     _ => return Err(EscrowError::InvalidArbiterState),
@@ -243,6 +246,8 @@ impl ServerModule for Escrow {
                 amount: input.amount,
                 fee: Amount::ZERO,
             },
+            // "self" here is escrow server module, this is incorrect
+            // should be whoever is going to be the recipient on the output side when amount is non-0
             pub_key: self.key().public_key(), /* sellers public key! the one who is getting the
                                                * money! */
         })
@@ -257,6 +262,9 @@ impl ServerModule for Escrow {
         let escrow_key = EscrowKey {
             escrow_id: output.escrow_id.to_string(),
         };
+        // in the escrow system, only the buyer should know the preimage to the hash (until it is revealed to the seller by the buyer)
+        // currently the line below uses 2 pubkeys + Amount (u64) as the preimage.. this is no secret as anyone can learn about this from the "info" endpoint
+        // buyer needs to provide ONLY the hash to the server and hold the preimage to himself
         let secret_code_hash = hash256(hash256(
             format!("{}{}{}", output.seller, output.arbiter, output.amount)
                 .chars()

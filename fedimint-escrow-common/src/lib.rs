@@ -41,6 +41,9 @@ pub enum EscrowAction {
     Retreat,
 }
 
+// shaurya: rustdoc should explain purposes of different states for EscrowStates
+// what is "open", what are we waiting for when we say "WaitingForBuyer" etc.?
+
 /// The states for the escrow module
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable, Serialize, Deserialize)]
 pub enum EscrowStates {
@@ -52,6 +55,10 @@ pub enum EscrowStates {
     WaitingforSeller,
 }
 
+// shaurya: rustdoc should explain purposes of different fields in EscrowInput
+// what configurations of optional fields apply in which case?
+// instead of having optional fields which only apply selectively depending on the actor (seller vs arbiter etc.), prefer having a top-level enum
+
 /// The input for the escrow module
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct EscrowInput {
@@ -61,7 +68,7 @@ pub struct EscrowInput {
     pub arbiter_state: Option<String>,
 }
 
-/// The output for the escrow module
+/// The output for the escrow module (what does it represent?)
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct EscrowOutput {
     pub amount: Amount,
@@ -69,6 +76,8 @@ pub struct EscrowOutput {
     pub seller_pubkey: PublicKey,
     pub arbiter_pubkey: PublicKey,
     pub escrow_id: String,
+    // explain retreat duration?
+    // "when the escrow is created I want to give buyer a timeout to retreat it..."
     pub retreat_duration: u64,
 }
 
@@ -119,6 +128,8 @@ impl CommonModuleInit for EscrowCommonInit {
     }
 }
 
+// shaurya: display impl for structs should display everything about that struct
+// these impls are important for consensus logs.. if something goes wrong (which it likely will), you will rely on these to look through guardian logs
 impl fmt::Display for EscrowClientConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "EscrowClientConfig")
