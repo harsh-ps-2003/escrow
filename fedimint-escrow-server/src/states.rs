@@ -1,7 +1,8 @@
+use fedimint_client::sm::{DynState, State, StateTransition};
+use fedimint_client::DynGlobalClientContext;
 use fedimint_core::core::{IntoDynInstance, ModuleInstanceId, OperationId};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::sm::{DynState, State, StateTransition};
-use fedimint_core::{DynGlobalClientContext, TransactionId};
+use fedimint_core::TransactionId;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -14,17 +15,6 @@ pub enum EscrowStateMachine {
     ResolvedWithoutDispute(String, TransactionId), // arbiter gets no fee
     ResolvedWithDispute(String, TransactionId),    // arbiter gets the fee
     Disputed(String, TransactionId),
-}
-
-/// The states for the escrow module
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub enum EscrowStates {
-    Open,
-    ResolvedWithoutDispute,
-    ResolvedWithDispute,
-    Disputed,
-    WaitingforBuyer,
-    WaitingforSeller,
 }
 
 impl State for EscrowStateMachine {
@@ -40,12 +30,17 @@ impl State for EscrowStateMachine {
 
         match self.clone() {
             EscrowStateMachine::Open(escrow_id, txid) => vec![StateTransition::new(
-                // await_tx_accepted(global_context.clone(), txid),
-                // move |dbtx, res, _state: Self| match res {
-                //     // client writes in own db, that txn completed after server side has already written it!
-                //     Ok(_) => Box::pin(async move { EscrowStateMachine::ResolvedWithoutDispute(escrow_id, txid) }),
-                //     Err(_) => Box::pin(async move { EscrowStateMachine::Disputed(escrow_id, txid) }),
-                // },
+                await_tx_accepted(global_context.clone(), txid),
+                move |dbtx, res, _state: Self| match res {
+                    // client writes in own db, that txn completed after server side has already
+                    // written it!
+                    Ok(_) => Box::pin(async move {
+                        EscrowStateMachine::ResolvedWithoutDispute(escrow_id, txid)
+                    }),
+                    Err(_) => {
+                        Box::pin(async move { EscrowStateMachine::Disputed(escrow_id, txid) })
+                    }
+                },
             )],
             EscrowStateMachine::ResolvedWithoutDispute(escrow_id, txid) => vec![],
             EscrowStateMachine::ResolvedWithDispute(escrow_id, txid) => vec![],

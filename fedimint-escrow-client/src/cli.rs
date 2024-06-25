@@ -5,13 +5,14 @@ use anyhow::Context;
 use chrono::prelude::*;
 use clap::Parser;
 use fedimint_core::Amount;
-use fedimint_escrow_server::ModuleInfo;
+use fedimint_escrow_common::endpoints::ModuleInfo;
+use fedimint_escrow_common::EscrowClientModule;
 use secp256k1::PublicKey;
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use super::EscrowClientModule;
+use super::EscrowStates;
 use crate::api::EscrowFederationApi;
 
 // TODO: we need cli-commands as well as API endpoints for these commands!

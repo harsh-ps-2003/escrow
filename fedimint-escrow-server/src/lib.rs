@@ -28,31 +28,20 @@ use fedimint_escrow_common::config::{
     EscrowClientConfig, EscrowConfig, EscrowConfigConsensus, EscrowConfigLocal,
     EscrowConfigPrivate, EscrowGenParams,
 };
-use fedimint_escrow_common::endpoints::{GET_MODULE_INFO, GET_SECRET_CODE_HASH};
+use fedimint_escrow_common::endpoints::{ModuleInfo, GET_MODULE_INFO, GET_SECRET_CODE_HASH};
 use fedimint_escrow_common::{
     hash256, EscrowAction, EscrowCommonInit, EscrowConsensusItem, EscrowInput, EscrowInputError,
-    EscrowModuleTypes, EscrowOutput, EscrowOutputError, CONSENSUS_VERSION,
+    EscrowModuleTypes, EscrowOutput, EscrowOutputError, EscrowStates, CONSENSUS_VERSION,
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
 use secp256k1::PublicKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use states::{EscrowError, EscrowStates};
+use states::EscrowError;
 
 /// Generates the module
 #[derive(Debug, Clone)]
 pub struct EscrowInit;
-
-/// ModuleInfo is the response to the GET_MODULE_INFO request
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ModuleInfo {
-    pub buyer_pubkey: PublicKey,
-    pub seller_pubkey: PublicKey,
-    pub arbiter_pubkey: PublicKey,
-    pub amount: Amount,
-    pub secret_code_hash: [u8; 32],
-    pub state: EscrowStates,
-}
 
 // // TODO: Boilerplate-code
 // #[async_trait]

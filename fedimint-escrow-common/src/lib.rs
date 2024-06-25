@@ -41,6 +41,17 @@ pub enum EscrowAction {
     Retreat,
 }
 
+/// The states for the escrow module
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable, Serialize, Deserialize)]
+pub enum EscrowStates {
+    Open,
+    ResolvedWithoutDispute,
+    ResolvedWithDispute,
+    Disputed,
+    WaitingforBuyer,
+    WaitingforSeller,
+}
+
 /// The input for the escrow module
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct EscrowInput {
@@ -76,7 +87,7 @@ pub struct EscrowModuleTypes;
 pub enum EscrowOutputOutcome {}
 
 impl std::fmt::Display for EscrowOutputOutcome {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         unimplemented!()
     }
 }
