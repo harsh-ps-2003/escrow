@@ -17,6 +17,7 @@ cli = []
 async-trait = { workspace = true }
 anyhow = { workspace = true }
 fedimint-escrow-common ={ path = "../fedimint-escrow-common" }
+fedimint-escrow-server = { path = "../fedimint-escrow-server" }
 fedimint-client = { workspace = true }
 fedimint-core ={ workspace = true }
 futures = { workspace = true }

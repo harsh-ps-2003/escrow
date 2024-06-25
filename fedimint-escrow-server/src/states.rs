@@ -6,8 +6,6 @@ use fedimint_core::TransactionId;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::db::EscrowKey;
-
 /// The state machine for the escrow module
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum EscrowStateMachine {
@@ -30,6 +28,7 @@ impl State for EscrowStateMachine {
 
         match self.clone() {
             EscrowStateMachine::Open(escrow_id, txid) => vec![StateTransition::new(
+                // will need transaction updates.
                 await_tx_accepted(global_context.clone(), txid),
                 move |dbtx, res, _state: Self| match res {
                     // client writes in own db, that txn completed after server side has already

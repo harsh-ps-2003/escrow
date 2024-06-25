@@ -23,7 +23,7 @@ use fedimint_core::module::{
     SupportedModuleApiVersions, TransactionItemAmount,
 };
 use fedimint_core::server::DynServerModule;
-use fedimint_core::{push_db_pair_items, Amount, OutPoint, PeerId, ServerModule};
+use fedimint_core::{Amount, OutPoint, PeerId, ServerModule};
 use fedimint_escrow_common::config::{
     EscrowClientConfig, EscrowConfig, EscrowConfigConsensus, EscrowConfigLocal,
     EscrowConfigPrivate, EscrowGenParams,
@@ -31,12 +31,10 @@ use fedimint_escrow_common::config::{
 use fedimint_escrow_common::endpoints::{ModuleInfo, GET_MODULE_INFO, GET_SECRET_CODE_HASH};
 use fedimint_escrow_common::{
     hash256, EscrowAction, EscrowCommonInit, EscrowConsensusItem, EscrowInput, EscrowInputError,
-    EscrowModuleTypes, EscrowOutput, EscrowOutputError, EscrowStates, CONSENSUS_VERSION,
+    EscrowModuleTypes, EscrowOutput, EscrowOutputError, EscrowOutputOutcome, EscrowStates,
+    CONSENSUS_VERSION,
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
-use secp256k1::PublicKey;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use states::EscrowError;
 
 /// Generates the module

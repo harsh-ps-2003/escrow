@@ -12,12 +12,12 @@ use fedimint_core::module::{ApiVersion, ModuleCommon, MultiApiVersion, Transacti
 use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint};
 use fedimint_escrow_common::config::EscrowClientConfig;
 use fedimint_escrow_common::{
-    hash256, EscrowAction, EscrowInput, EscrowModuleTypes, EscrowOutput, EscrowStateMachine, KIND,
+    hash256, EscrowAction, EscrowInput, EscrowModuleTypes, EscrowOutput, KIND,
 };
+use fedimint_escrow_server::EscrowStateMachine;
 use rand::{thread_rng, Rng};
-use secp256k1::{PublicKey, Secp256k1};
+use secp256k1::PublicKey;
 
-#[cfg(feature = "cli")]
 pub mod cli;
 
 /// The escrow client module
