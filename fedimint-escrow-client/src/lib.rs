@@ -12,7 +12,9 @@ use fedimint_core::module::{ApiVersion, ModuleCommon, MultiApiVersion, Transacti
 use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint};
 use fedimint_escrow_common::config::EscrowClientConfig;
 use fedimint_escrow_common::{
-    hash256, EscrowAction, EscrowInput, EscrowModuleTypes, EscrowOutput, KIND,
+    hash256, ArbiterDecision, EscrowInput, EscrowInputArbiterDecision,
+    EscrowInputClamingAfterDispute, EscrowInputDisputing, EscrowInputForClaming, EscrowInputSeller,
+    EscrowModuleTypes, EscrowOutput, KIND,
 };
 use fedimint_escrow_server::EscrowStateMachine;
 use rand::{thread_rng, Rng};
@@ -94,8 +96,8 @@ impl EscrowClientModule {
         amount: Amount,
         seller_pubkey: PublicKey,
         arbiter_pubkey: PublicKey,
-        retreat_duration: u64,
         escrow_id: String,
+        secret_code_hash: String,
     ) -> anyhow::Result<(OperationId, OutPoint)> {
         let operation_id = OperationId(thread_rng().gen());
 
@@ -105,7 +107,7 @@ impl EscrowClientModule {
             seller_pubkey,
             arbiter_pubkey,
             escrow_id,
-            retreat_duration,
+            secret_code_hash,
         };
 
         // buyer gets statemachine as an asset to track the ecash issued!
@@ -135,17 +137,28 @@ impl EscrowClientModule {
     pub async fn claim_escrow(
         &self,
         escrow_id: String,
-        secret_code: String,
         amount: Amount,
+        secret_code: String,
     ) -> anyhow::Result<()> {
+        // make an api call to server db and get the secret code hash and state of
+        // escrow, and then verify it
+        let response: [u8; 32] = self
+            .client_ctx
+            .api()
+            .request(GET_MODULE_INFO, escrow_id)
+            .await?;
+        if response.state == EscrowStates::Disputed {
+            return Err(EscrowError::EscrowDisputed);
+        }
+        if response.state != EscrowState::WaitingforSellerToClaim || EscrowState::Open {
+            return Err(EscrowError::ArbiterNotDecided);
+        }
         let operation_id = OperationId(thread_rng().gen());
         // Transfer ecash to seller by overfunding the transaction
         // Create input using the buyer account
-        let input = EscrowInput {
+        let input = EscrowInputForClaming {
             amount,
-            secret_code: Some(secret_code),
-            action: EscrowAction::Claim,
-            arbiter_state: None,
+            secret_code: secret_code,
         };
 
         // Build and send tx to the fed
@@ -168,17 +181,12 @@ impl EscrowClientModule {
         Ok(())
     }
 
-    /// Handles the retreat transaction and sends the transaction to the
-    /// federation for EscrowRetreat command
-    pub async fn escrow_retreat(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
+    /// Handles the claiming of transaction and sends the transaction to the
+    /// federation
+    pub async fn buyer_claim(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
         // Transfer ecash back to buyer by underfunding the transaction
-        let input = EscrowInput {
-            amount,
-            secret_code: None,
-            action: EscrowAction::Retreat,
-            arbiter_state: None,
-        };
+        let input = EscrowInputClamingAfterDispute { amount };
 
         // Build and send tx to the fed
         // The transaction builder will create mint output to cover the input amount by
@@ -208,12 +216,16 @@ impl EscrowClientModule {
         arbiter_fee: Amount,
     ) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
-        // Transfer ecash back to buyer by underfunding the transaction
-        let input = EscrowInput {
+
+        let escrow_info: ModuleInfo = self
+            .client_ctx
+            .api()
+            .request(GET_MODULE_INFO, escrow_id.clone())
+            .await?;
+
+        let input = EscrowInputDisputing {
             amount: arbiter_fee,
-            secret_code: None,
-            action: EscrowAction::Dispute,
-            arbiter_state: None,
+            disputer: self.key.public_key(), // the public key of the person who is disputing
         };
 
         // Build and send tx to the fed
@@ -238,14 +250,27 @@ impl EscrowClientModule {
 
     /// Handles the arbiter transaction and sends the transaction to the
     /// federation for EscrowArbiterDecision command
-    pub async fn arbiter_txn(&self, escrow_id: String, decision: String) -> anyhow::Result<()> {
+    pub async fn arbiter_decision(
+        &self,
+        escrow_id: String,
+        decision: String,
+        signature: String,
+        signed_message: String,
+    ) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
+
+        let arbiter_decision = match decision.to_lowercase().as_str() {
+            "buyer" => ArbiterDecision::BuyerWins,
+            "seller" => ArbiterDecision::SellerWins,
+            _ => return Err(EscrowError::InvalidArbiterDecision),
+        };
+
         // Transfer ecash back to buyer by underfunding the transaction
-        let input = EscrowInput {
+        let input = EscrowInputArbiterDecision {
             amount: Amount::ZERO,
-            secret_code: None,
-            action: EscrowAction::Dispute,
-            arbiter_state: Some(decision),
+            arbiter_decision,
+            signed_message,
+            signature,
         };
 
         // Build and send tx to the fed

@@ -31,10 +31,9 @@ pub struct EscrowValue {
     pub seller_pubkey: PublicKey,
     pub arbiter_pubkey: PublicKey,
     pub amount: Amount,
-    pub code_hash: [u8; 32],
+    pub secret_code_hash: String,
     pub state: EscrowStates,
     pub created_at: u64,
-    pub retreat_duration: u64,
 }
 
 /// Implement database record creation and lookup

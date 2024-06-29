@@ -25,6 +25,8 @@ async fn setup_test_env() -> anyhow::Result<(
     Client,
     EscrowClientModule,
     EscrowClientModule,
+    String,
+    String,
 )> {
     let fed = fixtures().new_fed().await;
     let (buyer, seller) = fed.two_clients().await;
@@ -41,6 +43,7 @@ async fn setup_test_env() -> anyhow::Result<(
     buyer.fund(sats(1100)).await?;
 
     let escrow_id = "escrow_id".to_string();
+    let secret_code_hash = "secret_code_hash".to_string();
 
     // buyer creates escrow
     let (operation_id, outpoint) = buyer_escrow
@@ -48,8 +51,8 @@ async fn setup_test_env() -> anyhow::Result<(
             Amount::sats(1000),
             seller.public_key(),
             arbiter.public_key(),
-            3600, // 1 hour retreat duration
             escrow_id,
+            secret_code_hash,
         )
         .await?;
 
@@ -61,6 +64,7 @@ async fn setup_test_env() -> anyhow::Result<(
         seller_escrow,
         arbiter_escrow,
         escrow_id,
+        secret_code_hash,
     ))
 }
 
@@ -86,7 +90,7 @@ async fn get_module_info_returns_expected() -> anyhow::Result<()> {
         "escrow_id": "escrow_id".to_string(),
         "status": "open", // Assuming the status is 'open' initially
         "amount": amount,
-        "retreat_duration": 3600
+        "secret_code_hash": secret_code_hash,
     });
 
     // Assert that the response matches the expected JSON
@@ -122,10 +126,10 @@ async fn can_dispute_and_resolve_escrow_in_favor_of_buyer() -> anyhow::Result<()
     buyer_escrow.initiate_dispute(escrow_id, sats(100)).await?;
 
     // Arbiter resolves dispute in favor of buyer
-    arbiter_escrow.arbiter_txn(escrow_id, "buyer").await?;
+    arbiter_escrow.arbiter_decision(escrow_id, "buyer").await?;
 
     // Buyer retreats funds but paid arbiter from his pocket
-    buyer_escrow.escrow_retreat(escrow_id, sats(900)).await?;
+    buyer_escrow.buyer_claim(escrow_id, sats(900)).await?;
 
     // Check balances
     assert_eq!(buyer.get_balance().await, sats(900)); // minus arbiter fee
@@ -145,7 +149,7 @@ async fn can_dispute_and_resolve_escrow_in_favor_of_seller() -> anyhow::Result<(
     buyer_escrow.initiate_dispute(escrow_id, sats(100)).await?;
 
     // Arbiter resolves dispute in favor of buyer
-    arbiter_escrow.arbiter_txn(escrow_id, "seller").await?;
+    arbiter_escrow.arbiter_decision(escrow_id, "seller").await?;
 
     // Seller claims disputed funds
     seller_escrow
@@ -156,20 +160,6 @@ async fn can_dispute_and_resolve_escrow_in_favor_of_seller() -> anyhow::Result<(
     assert_eq!(buyer.get_balance().await, Amount::ZERO); // minus arbiter fee
     assert_eq!(seller.get_balance().await, sats(1000));
     assert_eq!(arbiter.get_balance().await, sats(100));
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn retreat_fails_before_time_passed() -> anyhow::Result<()> {
-    let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow, escrow_id) =
-        setup_test_env().await?;
-
-    // Buyer tries to retreat before retreat duration has passed
-    let res = buyer_escrow.buyer_retreat(escrow_id).await;
-
-    // Check it returns RetreatTimeNotPassed error
-    assert!(matches!(res, Err(EscrowError::RetreatTimeNotPassed)));
 
     Ok(())
 }
@@ -230,15 +220,15 @@ async fn non_arbiter_cannot_resolve() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn cannot_retreat_before_arbiter_resolves() -> anyhow::Result<()> {
+async fn cannot_claim_before_arbiter_resolves() -> anyhow::Result<()> {
     let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow, escrow_id) =
         setup_test_env().await?;
 
     // Dispute the escrow
     seller_escrow.seller_dispute(escrow_id).await?;
 
-    // Buyer tries to retreat before arbiter resolves
-    let res = buyer_escrow.buyer_retreat(escrow_id).await;
+    // Buyer tries to claim before arbiter resolves
+    let res = buyer_escrow.buyer_claim(escrow_id, sats(900)).await;
 
     // Check it returns ArbiterNotDecided error
     assert!(matches!(res, Err(EscrowError::ArbiterNotDecided)));
@@ -252,7 +242,7 @@ async fn arbiter_decision_fails_when_not_disputed() -> anyhow::Result<()> {
         setup_test_env().await?;
 
     // Attempt to make an arbiter decision when no dispute has been raised
-    let res = arbiter_escrow.arbiter_txn(escrow_id, "buyer").await;
+    let res = arbiter_escrow.arbiter_decision(escrow_id, "buyer").await;
 
     // Check it returns EscrowNotDisputed error
     assert!(matches!(res, Err(EscrowError::EscrowNotDisputed)));

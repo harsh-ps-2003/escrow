@@ -91,4 +91,12 @@ pub enum EscrowError {
     InvalidStateForInitiatingDispute,
     #[error("Invalid state for claiming escrow")]
     InvalidStateForClaimingEscrow,
+    #[error("Unauthorized to dispute this escrow")]
+    UnauthorizedToDispute,
+    #[error("Invalid state for arbiter decision")]
+    InvalidStateForArbiterDecision,
+    #[error("Invalid arbiter signature")]
+    InvalidArbiter,
+    #[error("Invalid arbiter decision, either the winner can be the buyer or the seller")]
+    InvalidArbiterDecision,
 }

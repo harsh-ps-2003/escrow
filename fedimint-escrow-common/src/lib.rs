@@ -34,31 +34,66 @@ impl std::fmt::Display for EscrowConsensusItem {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub enum EscrowAction {
-    Claim,
-    Dispute,
-    Retreat,
-}
-
 /// The states for the escrow module
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable, Serialize, Deserialize)]
 pub enum EscrowStates {
     Open,
     ResolvedWithoutDispute,
     ResolvedWithDispute,
-    Disputed,
-    WaitingforBuyer,
-    WaitingforSeller,
+    DisputedByBuyer,
+    DisputedBySeller,
+    WaitingforBuyerToClaim,
+    WaitingforSellerToClaim,
 }
 
-/// The input for the escrow module
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct EscrowInput {
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum Disputer {
+    Buyer,
+    Seller,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum ArbiterDecision {
+    BuyerWins,
+    SellerWins,
+}
+
+pub enum EscrowInput {
+    ClamingWithoutDispute(EscrowInputClamingWithoutDispute),
+    Disputing(EscrowInputDisputing),
+    ClamingAfterDispute(EscrowInputClamingAfterDispute),
+    ArbiterDecision(EscrowInputArbiterDecision),
+}
+/// The input for the escrow module when the seller is claiming the escrow using
+/// the secret code
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct EscrowInputClamingWithoutDispute {
     pub amount: Amount,
-    pub secret_code: Option<String>,
-    pub action: EscrowAction,
-    pub arbiter_state: Option<String>,
+    pub secret_code: String,
+}
+
+/// The input for the escrow module when the arbiter needs
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct EscrowInputDisputing {
+    pub amount: Amount,
+    pub disputer: PublicKey,
+}
+
+/// The input for the escrow module when the seller or the buyer whosoever in
+/// favour arbiter decided is claiming the escrow without using the secret code
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct EscrowInputClamingAfterDispute {
+    pub amount: Amount,
+}
+
+/// The input for the escrow module when the seller is claiming the escrow using
+/// the secret code
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct EscrowInputArbiterDecision {
+    pub amount: Amount,
+    pub arbiter_decision: ArbiterDecision,
+    pub signed_message: String,
+    pub signature: String,
 }
 
 /// The output for the escrow module
@@ -69,7 +104,7 @@ pub struct EscrowOutput {
     pub seller_pubkey: PublicKey,
     pub arbiter_pubkey: PublicKey,
     pub escrow_id: String,
-    pub retreat_duration: u64,
+    pub secret_code_hash: String,
 }
 
 /// Errors that might be returned by the server when the buyer awaits guardians

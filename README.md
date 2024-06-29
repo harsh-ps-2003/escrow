@@ -6,7 +6,7 @@ The Escrow module of the Fedimint system facilitates secure transactions between
 
 ### 1. Escrow
 
-`fedimint-cli escrow [ARBITER_PUBLIC_KEY] [COST_OF_PRODUCT] [RETREAT_DURATION]`
+`fedimint-cli escrow [ARBITER_PUBLIC_KEY] [COST_OF_PRODUCT]`
 
 This command initiates an escrow transaction. It requires details about the arbiter, cost of the products, and the retreat duration (time limit for the transaction, after which the buyer can retreat the escrow if the seller hasn't acted).
 
@@ -30,13 +30,7 @@ Allows the seller to claim the escrow by providing the escrow ID and a secret co
 
 *You will get an error if the escrow is disputed!*
 
-### 4. EscrowRetreat
-
-Allows the buyer to retreat from the escrow transaction if the seller has not responded within the specified retreat duration.
-
-`fedimint-cli EscrowRetreat [ESCROW_ID]`
-
-### 5. EscrowDispute
+### 4. EscrowDispute
 
 Initiates a dispute for an escrow transaction. This command is used when there is a disagreement between the buyer and the seller (both can start the dispute), and the arbiter needs to intervene.
 
@@ -44,7 +38,7 @@ Initiates a dispute for an escrow transaction. This command is used when there i
 
 Once the escrow is disputed, the buyer cannot retreat and the seller cannot claim the escrow! Now the arbiter will decide who gets the ecash.
 
-### 6. EscrowArbiterDecision
+### 5. EscrowArbiterDecision
 
 Used by the assigned arbiter to make a decision on an escrow transaction that is in dispute.
 
@@ -54,8 +48,17 @@ Used by the assigned arbiter to make a decision on an escrow transaction that is
 
 The decision can either be in the favour of `buyer` or the `seller`, whosoever will get the ecash!
 
+### 6. BuyerClaim
+
+Used by the buyer to claim the ecash in the escrow when the arbiter decides in favour of buyer.
+
+### 7. SellerClaim
+
+Used by the seller to claim the ecash in the escrow when the arbiter decides in favour of seller.
+
 ## Escrow Module Use Flow
 
+// remove escrow retreat from mermaid
 ```mermaid
 graph TD
     A[Buyer] -->|Creates Escrow| B[Escrow]

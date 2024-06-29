@@ -18,11 +18,10 @@ use crate::api::EscrowFederationApi;
 // TODO: we need cli-commands as well as API endpoints for these commands!
 #[derive(Parser, Serialize)]
 enum Command {
-    escrow {
-        seller: PublicKey, // decide on this later, hexadecimal string or bytes ?
-        arbiter: PublicKey,
-        cost: Amount,          // actual cost of product
-        retreat_duration: u64, // in seconds
+    Escrow {
+        seller_pubkey: PublicKey, // decide on this later, hexadecimal string or bytes ?
+        arbiter_pubkey: PublicKey,
+        cost: Amount, // actual cost of product
     },
     EscrowInfo {
         escrow_id: String,
@@ -34,6 +33,18 @@ enum Command {
     EscrowDispute {
         escrow_id: String,
         arbiter_fee: Amount,
+    },
+    EscrowArbiterDecision {
+        escrow_id: String,
+        decision: ArbiterDecision,
+        signature: String,
+        signed_message: String,
+    },
+    BuyerClaim {
+        escrow_id: String,
+    },
+    SellerClaim {
+        escrow_id: String,
     },
 }
 
@@ -50,10 +61,13 @@ pub(crate) async fn handle_cli_command(
             seller_pubkey,
             arbiter_pubkey,
             cost,
-            retreat_duration,
         } => {
             // Create escrow id by hashing seller, arbiter, amount
             let escrow_id = hash256(format!("{}{}{}", seller_pubkey, arbiter_pubkey, cost));
+
+            // Generate a random secret code
+            let secret_code: [u8; 32] = rand::random();
+            let secret_code_hash = hash256(&secret_code);
 
             // finalize_and_submit txns to lock ecash by underfunding
             let (operation_id, out_point) = escrow
@@ -61,18 +75,10 @@ pub(crate) async fn handle_cli_command(
                     Amount::from_sat(cost),
                     seller_pubkey,
                     arbiter_pubkey,
-                    retreat_duration,
                     escrow_id.clone(),
+                    secret_code_hash,
                 )
                 .await?;
-
-            // Generate the secret code by hashing seller, arbiter and cost in reverse order
-            let code = hash256(
-                format!("{}{}{}", seller_pubkey, arbiter_pubkey, cost)
-                    .chars()
-                    .rev()
-                    .collect::<String>(),
-            );
 
             // If transaction is accepted and state is opened in server, share escrow ID and
             // CODE
@@ -95,38 +101,21 @@ pub(crate) async fn handle_cli_command(
                 "arbiter_pubkey": response.arbiter_pubkey,
                 "amount": response.amount,
                 "state": response.state,
-                // code_hash is intentionally omitted to not expose it in the response
+                // secret_code_hash is intentionally omitted to not expose it in the response
             }))
         }
         Command::EscrowClaim {
             escrow_id,
             secret_code,
         } => {
-            // make an api call to server db and get code hash, and then verify it
-            let response: [u8; 32] = escrow
-                .client_ctx
-                .api()
-                .request(GET_SECRET_CODE_HASH, escrow_id)
-                .await?;
-            if response.state == EscrowStates::Disputed {
-                return Err(EscrowError::EscrowDisputed);
-            }
-            if response.state != EscrowState::WaitingforSeller || EscrowState::Open {
-                return Err(EscrowError::ArbiterNotDecided);
-            }
-            if response.code_hash != hash256(secret_code) {
-                return Err(EscrowError::InvalidSecretCode);
-            }
             // seller claims ecash through finalize_and_submit txn by overfunding
             escrow
-                .claim_escrow(escrow_id, secret_code, response.amount)
+                .claim_escrow(escrow_id, response.amount, secret_code)
                 .await?;
             Ok(json!({
                 "escrow_id": escrow_id,
                 "status": "resolved"
             }))
-
-            // first handle server side state, then client side!
         }
         Command::EscrowDispute {
             escrow_id,
@@ -137,42 +126,16 @@ pub(crate) async fn handle_cli_command(
 
             Ok(json!({
                 "escrow_id": escrow_id,
-                "status": "disputed"
+                "status": "disputed!"
             }))
             // out of band notification to arbiter give escrow_id to get the
             // contract detail
         }
-        Command::EscrowRetreat { escrow_id } => {
-            // buyer can retreat the escrow if the seller doesn't act within a time period!
-            // also when the arbiter decides the ecash should be given to buyer, this
-            // command would be used!
-            let response: ModuleInfo = escrow
-                .client_ctx
-                .api()
-                .request(GET_MODULE_INFO, escrow_id)
-                .await?;
-            if response.state == EscrowStates::Disputed {
-                return Err(EscrowError::EscrowDisputed);
-            }
-            if response.state != EscrowState::WaitingforBuyer || EscrowState::Open {
-                return Err(EscrowError::ArbiterNotDecided);
-            }
-            // the state should be waiting for buyer to claim the ecash as arbiter has
-            // decided
-            let current_timestamp = chrono::Utc::now().timestamp() as u64;
-            let retreat_duration = response.retreat_duration; // time duration is set by the buyer while creating the escrow
-            if current_timestamp - response.created_at < retreat_duration {
-                return Err(EscrowError::RetreatTimeNotPassed);
-            }
-            escrow.escrow_retreat(escrow_id, response.amount).await?;
-            Ok(json!({
-                "escrow_id": escrow_id,
-                "status": "resolved!"
-            }))
-        }
         Command::EscrowArbiterDecision {
             escrow_id,
             decision,
+            signature,
+            signed_message,
         } => {
             // arbiter will decide the ecash should be given to buyer or seller and change
             // the state of escrow!
@@ -184,18 +147,43 @@ pub(crate) async fn handle_cli_command(
             if response.state != EscrowStates::Disputed {
                 return Err(EscrowError::EscrowNotDisputed);
             }
-            if response.arbiter != self.key().public_key() {
-                return Err(EscrowError::ArbiterNotMatched);
-            }
             // the arbiter can act only after the time decided by the buyer has passed
-            let current_timestamp = chrono::Utc::now().timestamp() as u64;
-            let retreat_duration = response.retreat_duration; // time duration is set by the buyer while creating the escrow
-            if current_timestamp - response.created_at < retreat_duration {
-                return Err(EscrowError::RetreatTimeNotPassed);
-            }
             // the arbiter will take a fee (decided off band)
             // decision has 2 values, buyer or seller.
-            escrow.arbiter_txn(escrow_id, decision).await?;
+            escrow
+                .arbiter_decision(escrow_id, decision, signature, signed_message)
+                .await?;
+            Ok(json!({
+                "escrow_id": escrow_id,
+                "status": "arbiter decision made!"
+            }))
+        }
+        Command::BuyerClaim { escrow_id } => {
+            // buyer can retreat the escrow if the seller doesn't act within a time period!
+            // also when the arbiter decides the ecash should be given to buyer, this
+            // command would be used!
+            let response: ModuleInfo = escrow
+                .client_ctx
+                .api()
+                .request(GET_MODULE_INFO, escrow_id)
+                .await?;
+            if response.state == EscrowStates::Disputed {
+                return Err(EscrowError::EscrowDisputed);
+            }
+            // the state should be waiting for buyer to claim the ecash as arbiter has
+            // decided
+            if response.state != EscrowState::WaitingforBuyerToClaim {
+                return Err(EscrowError::ArbiterNotDecided);
+            }
+            escrow.buyer_claim(escrow_id, response.amount).await?;
+            Ok(json!({
+                "escrow_id": escrow_id,
+                "status": "resolved!"
+            }))
+        }
+        Command::SellerClaim { escrow_id } => {
+            // seller claims ecash through finalize_and_submit txn by overfunding
+            escrow.seller_claim(escrow_id).await?;
             Ok(json!({
                 "escrow_id": escrow_id,
                 "status": "resolved!"
