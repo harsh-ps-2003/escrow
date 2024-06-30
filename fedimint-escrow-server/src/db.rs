@@ -1,16 +1,11 @@
-use fedimint_client::sm::DynState;
-use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::{DatabaseTransaction, DatabaseValue, IDatabaseTransactionOpsCoreTyped};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::registry::ModuleDecoderRegistry;
 use fedimint_core::{impl_db_record, Amount};
-use fedimint_escrow_common::Nonce;
+use fedimint_escrow_common::EscrowStates;
 use secp256k1::PublicKey;
-use strum_macros::EnumIter;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use strum_macros::EnumIter;
 
-// Define the key prefix for the database
+/// The key prefix for the database
 #[repr(u8)]
 #[derive(Clone, Debug, EnumIter)]
 pub enum DbKeyPrefix {
@@ -23,25 +18,26 @@ impl std::fmt::Display for DbKeyPrefix {
     }
 }
 
-// Define the key structure using a UUID
+/// The key structure using a UUID
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash)]
 pub struct EscrowKey {
     pub escrow_id: String,
 }
 
-// Define the value structure for the database record
+/// The structure for the database record
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EscrowValue {
-    pub buyer: PublicKey,
-    pub seller: PublicKey,
-    pub arbiter: PublicKey,
+    pub buyer_pubkey: PublicKey,
+    pub seller_pubkey: PublicKey,
+    pub arbiter_pubkey: PublicKey,
     pub amount: Amount,
-    pub code_hash: [u8; 32],
-    pub state: EscrowState,
+    pub secret_code_hash: String,
+    pub max_arbiter_fee: Amount,
+    pub state: EscrowStates,
     pub created_at: u64,
 }
 
-// Implement database record creation and lookup
+/// Implement database record creation and lookup
 impl_db_record!(
     key = EscrowKey,
     value = EscrowValue,

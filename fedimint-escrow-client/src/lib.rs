@@ -9,18 +9,21 @@ use fedimint_client::transaction::{ClientInput, ClientOutput, TransactionBuilder
 use fedimint_core::core::{Decoder, KeyPair, OperationId};
 use fedimint_core::db::Database;
 use fedimint_core::module::{ApiVersion, ModuleCommon, MultiApiVersion, TransactionItemAmount};
-use fedimint_core::{apply, async_trait_maybe_send, Amount, OperationId, OutPoint};
+use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint};
 use fedimint_escrow_common::config::EscrowClientConfig;
-use fedimint_escrow_common::{hash256, EscrowInput, EscrowModuleTypes, EscrowOutput, KIND};
-use fedimint_escrow_server::states::EscrowStateMachine;
-use rand::Rng;
-use secp256k1::{PublicKey, Secp256k1};
+use fedimint_escrow_common::{
+    hash256, ArbiterDecision, EscrowInput, EscrowInputArbiterDecision, EscrowInputArbiterDecision,
+    EscrowInputClamingAfterDispute, EscrowInputClamingWithoutDispute, EscrowInputDisputing,
+    EscrowInputDisputing, EscrowInputForClaming, EscrowInputSeller, EscrowModuleTypes,
+    EscrowOutput, KIND,
+};
+use fedimint_escrow_server::EscrowStateMachine;
+use rand::{thread_rng, Rng};
+use secp256k1::PublicKey;
 
-use crate::cli::CODE;
-
-#[cfg(feature = "cli")]
 pub mod cli;
 
+/// The escrow client module
 #[derive(Debug)]
 pub struct EscrowClientModule {
     cfg: EscrowClientConfig,
@@ -30,7 +33,7 @@ pub struct EscrowClientModule {
     db: Database,
 }
 
-/// Data needed by the state machine
+/// Data needed by the state machine as context
 #[derive(Debug, Clone)]
 pub struct EscrowClientContext {
     pub escrow_decoder: Decoder,
@@ -87,27 +90,37 @@ impl ClientModule for EscrowClientModule {
 }
 
 impl EscrowClientModule {
-    // attach ecash to the transaction and submit it to federation
-    pub async fn buyer_txn(
+    /// Handles the buyer transaction and sends the transaction to the
+    /// federation for escrow command
+    pub async fn create_escrow(
         &self,
         amount: Amount,
-        buyer: PublicKey,
-        seller: PublicKey,
-        arbiter: PublicKey,
-        retreat_duration: u64,
+        seller_pubkey: PublicKey,
+        arbiter_pubkey: PublicKey,
+        escrow_id: String,
+        secret_code_hash: String,
+        max_arbiter_fee_bps: u16,
     ) -> anyhow::Result<(OperationId, OutPoint)> {
         let operation_id = OperationId(thread_rng().gen());
-        let escrow_id = hash256(vec![buyer, seller, arbiter, amount.to_string()].concat()); // create escrow id by hashing buyer, seller, arbiter, amount in a ascending
-                                                                                            // order
+
+        // Validate max_arbiter_fee_bps
+        if max_arbiter_fee_bps < 10 || max_arbiter_fee_bps > 1000 {
+            return Err(anyhow::anyhow!(
+                "Max arbiter fee must be between 10 and 1000 basis points"
+            ));
+        }
+
+        let fee_percentage = Decimal::from(max_arbiter_fee_bps) / Decimal::from(100);
+        let max_arbiter_fee = amount * fee_percentage / Decimal::from(100.0);
 
         let output = EscrowOutput {
             amount,
-            buyer,
-            seller,
-            arbiter,
-            state: EscrowStates::Open,
+            buyer_pubkey: self.key.public_key(),
+            seller_pubkey,
+            arbiter_pubkey,
             escrow_id,
-            retreat_duration,
+            secret_code_hash,
+            max_arbiter_fee,
         };
 
         // buyer gets statemachine as an asset to track the ecash issued!
@@ -117,38 +130,48 @@ impl EscrowClientModule {
         // output to cover the output amount and create the corresponding inputs itself
         let tx = TransactionBuilder::new().with_output(self.client_ctx.make_client_output(output));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (_, change) = self
+        let (txid, change) = self
             .client_ctx
-            .finalize_and_submit_transaction(op_id, KIND.as_str(), outpoint, tx)
+            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
-        let tx_subscription = self.client_ctx.transaction_updates(op_id).await;
+        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
 
         tx_subscription
             .await_tx_accepted(txid)
             .await
             .map_err(|e| anyhow!(e))?;
 
-        Ok((operation_id, change[0], escrow_id))
+        Ok((operation_id, change[0]))
     }
 
-    // dont involve consensus until necessary
-    // code should not work when arbiter is not involved!
-    // when arbiter involved, 2 txns are involved!
-
-    pub async fn seller_txn(
+    /// Handles the seller transaction and sends the transaction to the
+    /// federation for EscrowClaim command
+    pub async fn claim_escrow(
         &self,
         escrow_id: String,
-        secret_code: String,
         amount: Amount,
+        secret_code: String,
     ) -> anyhow::Result<()> {
+        // make an api call to server db and get the secret code hash and state of
+        // escrow, and then verify it
+        let response: [u8; 32] = self
+            .client_ctx
+            .api()
+            .request(GET_MODULE_INFO, escrow_id)
+            .await?;
+        if response.state == EscrowStates::Disputed {
+            return Err(EscrowError::EscrowDisputed);
+        }
+        if response.state != EscrowState::WaitingforSellerToClaim || EscrowState::Open {
+            return Err(EscrowError::ArbiterNotDecided);
+        }
         let operation_id = OperationId(thread_rng().gen());
         // Transfer ecash to seller by overfunding the transaction
         // Create input using the buyer account
-        let input = EscrowInput {
+        let input = EscrowInputForClaming {
             amount,
-            secret_code: Some(secret_code),
-            action: EscrowAction::Claim,
+            secret_code: secret_code,
         };
 
         // Build and send tx to the fed
@@ -156,7 +179,7 @@ impl EscrowClientModule {
         // itself
         let tx = TransactionBuilder::new().with_input(self.client_ctx.make_client_input(input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (_, change) = self
+        let (txid, change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
@@ -171,26 +194,24 @@ impl EscrowClientModule {
         Ok(())
     }
 
-    pub async fn retreat_txn(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
+    /// Handles the claiming of transaction and sends the transaction to the
+    /// federation
+    pub async fn buyer_claim(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
         // Transfer ecash back to buyer by underfunding the transaction
-        let input = EscrowInput {
-            amount,
-            secret_code: None,
-            action: EscrowAction::Retreat,
-        };
+        let input = EscrowInputClamingAfterDispute { amount };
 
         // Build and send tx to the fed
         // The transaction builder will create mint output to cover the input amount by
         // itself
         let tx = TransactionBuilder::new().with_input(self.client_ctx.make_client_input(input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (_, change) = self
+        let (txid, change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
-        let tx_subscription = self.client_ctx.transaction_updates(op_id).await;
+        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
 
         tx_subscription
             .await_tx_accepted(txid)
@@ -200,11 +221,126 @@ impl EscrowClientModule {
         Ok(())
     }
 
-    // think how arbiter will initiate dispute with a txn (input only) of its own
-    // and change state
+    /// Handles the claiming of transaction and sends the transaction to the
+    /// federation
+    pub async fn seller_claim(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
+        let operation_id = OperationId(thread_rng().gen());
+        // Transfer ecash back to buyer by underfunding the transaction
+        let input = EscrowInputClamingAfterDispute { amount };
+
+        // Build and send tx to the fed
+        // The transaction builder will create mint output to cover the input amount by
+        // itself
+        let tx = TransactionBuilder::new().with_input(self.client_ctx.make_client_input(input));
+        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
+        let (txid, change) = self
+            .client_ctx
+            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
+            .await?;
+
+        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
+
+        tx_subscription
+            .await_tx_accepted(txid)
+            .await
+            .map_err(|e| anyhow!(e))?;
+
+        Ok(())
+    }
+
+    /// Handles the initiate dispute transaction and sends the transaction to
+    /// the federation for EscrowDispute command
     pub async fn initiate_dispute(&self, escrow_id: String) -> anyhow::Result<()> {
-        // TODO : a consensus item submitted via guardian api endpoint? how and why?
-        // can dispute be rejected?
+        let operation_id = OperationId(thread_rng().gen());
+
+        let escrow_info: ModuleInfo = self
+            .client_ctx
+            .api()
+            .request(GET_MODULE_INFO, escrow_id.clone())
+            .await?;
+
+        let input = EscrowInputDisputing {
+            amount: Amount::ZERO,
+            disputer: self.key.public_key(), // the public key of the person who is disputing
+        };
+
+        // Build and send tx to the fed
+        // The transaction builder will create mint output to cover the input amount by
+        // itself
+        let tx = TransactionBuilder::new().with_input(self.client_ctx.make_client_input(input));
+        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
+        let (txid, change) = self
+            .client_ctx
+            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
+            .await?;
+
+        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
+
+        tx_subscription
+            .await_tx_accepted(txid)
+            .await
+            .map_err(|e| anyhow!(e))?;
+
+        Ok(())
+    }
+
+    /// Handles the arbiter transaction and sends the transaction to the
+    /// federation for EscrowArbiterDecision command
+    pub async fn arbiter_decision(
+        &self,
+        escrow_id: String,
+        decision: String,
+        signature: String,
+        arbiter_fee_bps: u16,
+    ) -> anyhow::Result<()> {
+        let operation_id = OperationId(thread_rng().gen());
+
+        let arbiter_decision = match decision.to_lowercase().as_str() {
+            "buyer" => ArbiterDecision::BuyerWins,
+            "seller" => ArbiterDecision::SellerWins,
+            _ => return Err(EscrowError::InvalidArbiterDecision),
+        };
+
+        // produce the signature using the private key and the decision
+        // Create a message from the decision
+        let message = Message::from_hashed_data::<sha256::Hash>(decision.as_bytes());
+        // Sign the message using Schnorr signature
+        let signature = secp.sign_schnorr(&message, &self.key);
+
+        let escrow_info: ModuleInfo = self
+            .client_ctx
+            .api()
+            .request(GET_MODULE_INFO, escrow_id.clone())
+            .await?;
+
+        let fee_percentage = Decimal::from(arbiter_fee_bps) / Decimal::from(100);
+        let arbiter_fee = escrow_info.amount * fee_percentage / Decimal::from(100.0);
+
+        // Transfer ecash back to buyer by underfunding the transaction
+        let input = EscrowInputArbiterDecision {
+            amount: arbiter_fee,
+            arbiter_decision,
+            signature: signature,
+            message: message,
+        };
+
+        // Build and send tx to the fed
+        // The transaction builder will create mint output to cover the input amount by
+        // itself
+        let tx = TransactionBuilder::new().with_input(self.client_ctx.make_client_input(input));
+        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
+        let (txid, change) = self
+            .client_ctx
+            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
+            .await?;
+
+        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
+
+        tx_subscription
+            .await_tx_accepted(txid)
+            .await
+            .map_err(|e| anyhow!(e))?;
+
         Ok(())
     }
 
@@ -223,6 +359,7 @@ impl EscrowClientModule {
     // }
 }
 
+/// The escrow client module initializer
 #[derive(Debug, Clone)]
 pub struct EscrowClientInit;
 

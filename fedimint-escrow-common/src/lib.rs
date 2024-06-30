@@ -1,3 +1,5 @@
+pub mod endpoints;
+
 use std::fmt;
 
 use config::EscrowClientConfig;
@@ -5,8 +7,10 @@ use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
 use fedimint_core::{plugin_types_trait_impl_common, Amount};
-use secp256k1::{KeyPair, PublicKey};
+use hex;
+use secp256k1::{Message, PublicKey, Signature};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 // Common contains types shared by both the client and server
@@ -24,30 +28,84 @@ pub const CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion::ne
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct EscrowConsensusItem;
 
-pub enum EscrowAction {
-    Claim,
-    Dispute,
-    Retreat,
+impl std::fmt::Display for EscrowConsensusItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EscrowConsensusItem")
+    }
 }
 
-// Input for a Fedimint transaction
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct EscrowInput {
+/// The states for the escrow module
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable, Serialize, Deserialize)]
+pub enum EscrowStates {
+    Open,
+    ResolvedWithoutDispute,
+    ResolvedWithDispute,
+    DisputedByBuyer,
+    DisputedBySeller,
+    WaitingforBuyerToClaim,
+    WaitingforSellerToClaim,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum Disputer {
+    Buyer,
+    Seller,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum ArbiterDecision {
+    BuyerWins,
+    SellerWins,
+}
+
+pub enum EscrowInput {
+    ClamingWithoutDispute(EscrowInputClamingWithoutDispute),
+    Disputing(EscrowInputDisputing),
+    ClamingAfterDispute(EscrowInputClamingAfterDispute),
+    ArbiterDecision(EscrowInputArbiterDecision),
+}
+/// The input for the escrow module when the seller is claiming the escrow using
+/// the secret code
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct EscrowInputClamingWithoutDispute {
     pub amount: Amount,
-    pub secret_code: Option<String>,
-    pub action: EscrowAction,
+    pub secret_code: String,
 }
 
-// Output for a Fedimint transaction
+/// The input for the escrow module when the arbiter needs
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct EscrowInputDisputing {
+    pub amount: Amount,
+    pub disputer: PublicKey,
+}
+
+/// The input for the escrow module when the seller or the buyer whosoever in
+/// favour arbiter decided is claiming the escrow without using the secret code
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct EscrowInputClamingAfterDispute {
+    pub amount: Amount,
+}
+
+/// The input for the escrow module when the seller is claiming the escrow using
+/// the secret code
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct EscrowInputArbiterDecision {
+    pub amount: Amount,
+    pub arbiter_decision: ArbiterDecision,
+    pub signature: Signature,
+    pub message: Message,
+}
+
+/// The output for the escrow module
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct EscrowOutput {
     pub amount: Amount,
-    pub buyer: PublicKey,
-    pub seller: PublicKey,
-    pub arbiter: PublicKey,
-    pub state: EscrowState,
+    pub buyer_pubkey: PublicKey,
+    pub seller_pubkey: PublicKey,
+    pub arbiter_pubkey: PublicKey,
     pub escrow_id: String,
-    pub retreat_duration: u64,
+    pub secret_code_hash: String,
+    pub max_arbiter_fee: Amount,
 }
 
 /// Errors that might be returned by the server when the buyer awaits guardians
@@ -58,9 +116,17 @@ pub enum EscrowInputError {}
 /// Errors that might be returned by the server
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
 pub enum EscrowOutputError {}
-
 /// Contains the types defined above
 pub struct EscrowModuleTypes;
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
+pub enum EscrowOutputOutcome {}
+
+impl std::fmt::Display for EscrowOutputOutcome {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unimplemented!()
+    }
+}
 
 // Wire together the types for this module
 plugin_types_trait_impl_common!(
@@ -70,9 +136,11 @@ plugin_types_trait_impl_common!(
     EscrowOutput,
     EscrowConsensusItem,
     EscrowInputError,
-    EscrowOutputError
+    EscrowOutputError,
+    EscrowOutputOutcome
 );
 
+/// The common initializer for the escrow module
 #[derive(Debug)]
 pub struct EscrowCommonInit;
 
@@ -105,32 +173,10 @@ impl fmt::Display for EscrowOutput {
     }
 }
 
-pub fn hash256(value: &str) -> String {
+/// Hashes the value using SHA256
+pub fn hash256(value: String) -> String {
     let mut hasher = Sha256::new();
     hasher.update(value.as_bytes());
     let result = hasher.finalize();
     hex::encode(result)
 }
-
-// /// A special key that creates assets for a test/example
-// const FED_SECRET_PHRASE: &str = "Money printer go brrr...........";
-
-// const BROKEN_FED_SECRET_PHRASE: &str = "Money printer go <boom>........!";
-
-// pub fn fed_public_key() -> PublicKey {
-//     fed_key_pair().public_key()
-// }
-
-// pub fn fed_key_pair() -> KeyPair {
-//     KeyPair::from_seckey_slice(&Secp256k1::new(),
-// FED_SECRET_PHRASE.as_bytes()).expect("32 bytes") }
-
-// pub fn broken_fed_public_key() -> PublicKey {
-//     broken_fed_key_pair().public_key()
-// }
-
-// // Like fed, but with a broken accounting
-// pub fn broken_fed_key_pair() -> KeyPair {
-//     KeyPair::from_seckey_slice(&Secp256k1::new(),
-// BROKEN_FED_SECRET_PHRASE.as_bytes())         .expect("32 bytes")
-// }

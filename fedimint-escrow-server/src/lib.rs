@@ -1,77 +1,80 @@
+mod db;
+mod states;
+
 use std::collections::BTreeMap;
 
 use anyhow::bail;
 use async_trait::async_trait;
 use chrono::prelude::*;
+use db::{DbKeyPrefix, EscrowKey, EscrowValue};
 use fedimint_core::config::{
     ConfigGenModuleParams, DkgResult, ServerModuleConfig, ServerModuleConsensusConfig,
     TypedServerModuleConfig, TypedServerModuleConsensusConfig,
 };
-use fedimint_core::core::ModuleInstanceId;
+use fedimint_core::core::{DynClientConfig, IntoDynInstance, ModuleInstanceId};
 use fedimint_core::db::{
     DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped, NonCommittable,
     ServerMigrationFn,
 };
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
-    api_endpoint, ApiEndpoint, CoreConsensusVersion, InputMeta, ModuleConsensusVersion, ModuleInit,
-    PeerHandle, ServerModuleInit, ServerModuleInitArgs, SupportedModuleApiVersions,
-    TransactionItemAmount,
+    api_endpoint, ApiEndpoint, ApiError, ApiVersion, CoreConsensusVersion, InputMeta,
+    ModuleConsensusVersion, ModuleInit, PeerHandle, ServerModuleInit, ServerModuleInitArgs,
+    SupportedModuleApiVersions, TransactionItemAmount,
 };
 use fedimint_core::server::DynServerModule;
-use fedimint_core::{push_db_pair_items, Amount, OutPoint, PeerId, ServerModule};
-use fedimint_escrow_client::CODE;
+use fedimint_core::{Amount, OutPoint, PeerId, ServerModule};
 use fedimint_escrow_common::config::{
     EscrowClientConfig, EscrowConfig, EscrowConfigConsensus, EscrowConfigLocal,
     EscrowConfigPrivate, EscrowGenParams,
 };
+use fedimint_escrow_common::endpoints::{ModuleInfo, GET_MODULE_INFO};
 use fedimint_escrow_common::{
-    broken_fed_public_key, fed_public_key, hash256, ApiError, EscrowCommonInit,
-    EscrowConsensusItem, EscrowInput, EscrowInputError, EscrowModuleTypes, EscrowOutput,
-    EscrowOutputError, GetModuleInfoRequest, ModuleInfo, CONSENSUS_VERSION,
+    hash256, EscrowCommonInit, EscrowConsensusItem, EscrowInput, EscrowInputError,
+    EscrowModuleTypes, EscrowOutput, EscrowOutputError, EscrowOutputOutcome, EscrowStates,
+    CONSENSUS_VERSION,
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
-use sha2::{Digest, Sha256};
-
-use crate::db::{DbKeyPrefix, EscrowKey, NonceKey, NonceKeyPrefix};
+use secp256k1::{Message, PublicKey, Secp256k1, Signature};
+use states::EscrowError;
 
 /// Generates the module
 #[derive(Debug, Clone)]
 pub struct EscrowInit;
 
-// TODO: Boilerplate-code
-#[async_trait]
-impl ModuleInit for EscrowInit {
-    type Common = EscrowCommonInit;
-    const DATABASE_VERSION: DatabaseVersion = DatabaseVersion(1);
+// // TODO: Boilerplate-code
+// #[async_trait]
+// impl ModuleInit for EscrowInit {
+//     type Common = EscrowCommonInit;
+//     const DATABASE_VERSION: DatabaseVersion = DatabaseVersion(1);
 
-    /// Dumps all database items for debugging
-    async fn dump_database(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        prefix_names: Vec<String>,
-    ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
-        // TODO: Boilerplate-code
-        let mut items: BTreeMap<String, Box<dyn erased_serde::Serialize + Send>> = BTreeMap::new();
-        let filtered_prefixes = DbKeyPrefix::iter().filter(|f| {
-            prefix_names.is_empty() || prefix_names.contains(&f.to_string().to_lowercase())
-        });
+//     /// Dumps all database items for debugging
+//     async fn dump_database(
+//         &self,
+//         dbtx: &mut DatabaseTransaction<'_>,
+//         prefix_names: Vec<String>,
+//     ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize +
+// Send>)> + '_> {         // TODO: Boilerplate-code
+//         let mut items: BTreeMap<String, Box<dyn erased_serde::Serialize +
+// Send>> = BTreeMap::new();         let filtered_prefixes =
+// DbKeyPrefix::iter().filter(|f| {             prefix_names.is_empty() ||
+// prefix_names.contains(&f.to_string().to_lowercase())         });
 
-        for table in filtered_prefixes {
-            match table {
-                DbKeyPrefix::Escrow => {
-                    push_db_pair_items!(
-                        dbtx, Escrow, EscrowKey,
-                        Amount, // i guess it should be string (ecash)
-                        items, "Escrow"
-                    );
-                }
-            }
-        }
+//         for table in filtered_prefixes {
+//             match table {
+//                 DbKeyPrefix::Escrow => {
+//                     push_db_pair_items!(
+//                         dbtx, Escrow, EscrowKey,
+//                         Amount,
+//                         items, "Escrow"
+//                     );
+//                 }
+//             }
+//         }
 
-        Box::new(items.into_iter())
-    }
-}
+//         Box::new(items.into_iter())
+//     }
+// }
 
 /// Implementation of server module non-consensus functions
 #[async_trait]
@@ -157,7 +160,15 @@ impl ServerModuleInit for EscrowInit {
     }
 }
 
-/// escrow module
+impl IntoDynInstance for EscrowClientConfig {
+    type DynType = DynClientConfig;
+
+    fn into_dyn(self, instance_id: ModuleInstanceId) -> Self::DynType {
+        DynClientConfig::new(instance_id, self)
+    }
+}
+
+/// The escrow module
 #[derive(Debug)]
 pub struct Escrow {
     pub cfg: EscrowConfig,
@@ -177,8 +188,6 @@ impl ServerModule for Escrow {
         Vec::new()
     }
 
-    // enum of possible transitions for the state
-    // TODO : will use consensus items for dispute!
     async fn process_consensus_item<'a, 'b>(
         &'a self,
         _dbtx: &mut DatabaseTransaction<'b>,
@@ -186,9 +195,6 @@ impl ServerModule for Escrow {
         _peer_id: PeerId,
     ) -> anyhow::Result<()> {
         bail!("The escrow module does not use consensus items");
-        // consensus item should be created for a dispute
-        // state change here instead of `process_input` for disputes
-        // how will we get seller and buyers keypair for transaction building?
     }
 
     async fn process_input<'a, 'b, 'c>(
@@ -202,38 +208,101 @@ impl ServerModule for Escrow {
         let mut escrow_value: EscrowValue = dbtx
             .get_value(&escrow_key)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Escrow not found"))?; // use EscrowError for this
+            .ok_or_else(|| EscrowError::EscrowNotFound)?;
 
-        match input.action {
-            EscrowAction::Claim => match escrow_value.state {
-                EscrowStates::Open => {
-                    escrow_value.state = EscrowStates::ResolvedWithoutDispute;
-                    self.delete_escrow_data(dbtx, &escrow_key.escrow_id).await?;
+        let claimer = escrow_value.seller_pubkey;
+
+        match input {
+            EscrowInput::ClamingWithoutDispute(escrow_input) => {
+                // the secret code when hashed should be the same as the one in the db
+                if escrow_value.secret_code_hash != hash256(escrow_input.secret_code) {
+                    return Err(EscrowError::InvalidSecretCode);
                 }
-                EscrowStates::Disputed => {
-                    escrow_value.state = EscrowStates::ResolvedWithDispute;
-                    self.delete_escrow_data(dbtx, &escrow_key.escrow_id).await?;
-                }
-                _ => return Err(anyhow!("Invalid state for claiming escrow").into()),
-            },
-            EscrowAction::Dispute => {
-                escrow_value.state = EscrowStates::Disputed;
-            }
-            EscrowAction::Retreat => {
                 escrow_value.state = EscrowStates::ResolvedWithoutDispute;
-                self.delete_escrow_data(dbtx, &escrow_key.escrow_id).await?;
             }
+            EscrowInput::Disputing(escrow_input) => {
+                // Determine who is disputing
+                let disputer = if escrow_input.disputer == escrow_value.buyer_pubkey {
+                    Disputer::Buyer
+                } else if escrow_input.disputer == escrow_value.seller_pubkey {
+                    Disputer::Seller
+                } else {
+                    return Err(EscrowError::UnauthorizedToDispute);
+                };
+
+                match escrow_value.state {
+                    EscrowStates::Open => {
+                        escrow_value.state = match disputer {
+                            Disputer::Buyer => EscrowStates::DisputedByBuyer,
+                            Disputer::Seller => EscrowStates::DisputedBySeller,
+                        };
+                    }
+                    _ => return Err(EscrowError::InvalidStateForInitiatingDispute),
+                }
+            }
+            EscrowInput::ArbiterDecision(escrow_input) => {
+                // the escrow state should be disputed for the arbiter to take decision
+                let response: ModuleInfo = escrow
+                    .client_ctx
+                    .api()
+                    .request(GET_MODULE_INFO, escrow_id)
+                    .await?;
+                if response.state != EscrowStates::Disputed {
+                    return Err(EscrowError::EscrowNotDisputed);
+                }
+                // check the signature of arbiter
+                let secp = Secp256k1::new();
+                if !secp
+                    .verify(
+                        &escrow_input.message,
+                        &escrow_input.signature,
+                        &escrow_value.arbiter_pubkey,
+                    )
+                    .is_ok()
+                {
+                    return Err(EscrowError::InvalidArbiter);
+                }
+
+                // Validate arbiter's fee
+                if escrow_input.amount > response.max_arbiter_fee {
+                    return Err(anyhow::anyhow!("Arbiter fee exceeds the maximum allowed"));
+                } else {
+                    // the contract amount is the amount of ecash in the contract - arbiter fee
+                    response.amount = response.amount - escrow_input.amount;
+                }
+
+                // Update the escrow state based on the arbiter's decision
+                match escrow_input.arbiter_decision.as_ref() {
+                    ArbiterDecision::BuyerWins => {
+                        escrow_value.state = EscrowStates::WaitingforBuyerToClaim;
+                    }
+                    ArbiterDecision::SellerWins => {
+                        escrow_value.state = EscrowStates::WaitingforSellerToClaim;
+                    }
+                }
+            }
+            EscrowInput::ClaimingAfterDispute(escrow_input) => match escrow_value.state {
+                EscrowStates::WaitingforBuyerToClaim => {
+                    escrow_value.state = EscrowStates::ResolvedWithDispute;
+                    claimer = escrow_value.buyer_pubkey;
+                }
+                EscrowStates::WaitingforSellerToClaim => {
+                    escrow_value.state = EscrowStates::ResolvedWithDispute;
+                }
+                _ => return Err(EscrowError::InvalidStateForClaimingEscrow),
+            },
         }
 
+        // Update the escrow value in the database
         dbtx.insert_entry(&escrow_key, &escrow_value).await?;
         dbtx.commit().await?;
 
         Ok(InputMeta {
             amount: TransactionItemAmount {
                 amount: input.amount,
-                fee: self.cfg.consensus.deposit_fee,
+                fee: Amount::ZERO,
             },
-            pub_key: self.key().public_key(),
+            pub_key: claimer, // the one who is getting the ecash
         })
     }
 
@@ -244,25 +313,23 @@ impl ServerModule for Escrow {
         out_point: OutPoint,
     ) -> Result<TransactionItemAmount, EscrowOutputError> {
         let escrow_key = EscrowKey {
-            uuid: output.escrow_id.to_string(),
+            escrow_id: output.escrow_id,
         };
-        let code_hash = hash256(CODE);
         let escrow_value = EscrowValue {
-            buyer: output.buyer,
-            seller: output.seller,
-            arbiter: output.arbiter,
+            buyer_pubkey: output.buyer_pubkey,
+            seller_pubkey: output.seller_pubkey,
+            arbiter_pubkey: output.arbiter_pubkey,
             amount: output.amount.to_string(),
-            code_hash,
-            state: output.state,
-            created_at: chrono::Utc::now().timestamp() as u64, /* set the timestamp for escrow
-                                                                * creation */
-            retreat_duration: output.retreat_duration,
+            secret_code_hash: output.secret_code_hash,
+            max_arbiter_fee: output.max_arbiter_fee,
+            state: EscrowStates::Open,
+            created_at: chrono::Utc::now().timestamp(), // set the timestamp for escrow creation
         };
 
         // guardian db entry
         dbtx.insert_new_entry(
             &EscrowKey {
-                escrow_id: output.escrow_id.to_string(),
+                escrow_id: output.escrow_id,
             },
             &escrow_value,
         )
@@ -272,8 +339,6 @@ impl ServerModule for Escrow {
             amount: output.amount,
             fee: self.cfg.consensus.deposit_fee,
         })
-        // implemented! TODO : signature using public keys of buyer, seller and
-        // arbiter to secure it!
     }
 
     async fn output_status(
@@ -281,8 +346,7 @@ impl ServerModule for Escrow {
         dbtx: &mut DatabaseTransaction<'_>,
         out_point: OutPoint,
     ) -> Option<EscrowOutputOutcome> {
-        // check whether or not the output has been processed
-        dbtx.get_value(&EscrowKey(out_point)).await
+        unimplemented!()
     }
 
     async fn audit(
@@ -314,23 +378,13 @@ impl ServerModule for Escrow {
 
     // api will be called in client
     fn api_endpoints(&self) -> Vec<ApiEndpoint<Self>> {
-        vec![
-            api_endpoint! {
-                GET_MODULE_INFO,
-                ApiVersion::new(0, 0),
-                async |module: &Escrow, context, request: GetModuleInfoRequest| -> ModuleInfo {
-                    module.handle_get_module_info(&mut context.dbtx().into_nc(), &request).await
-                }
-            },
-            api_endpoint! {
-                GET_SECRET_CODE_HASH,
-                ApiVersion::new(0, 0),
-                async |module: &Escrow, context, escrow_id: String| -> Result<SecretCodeHash, EscrowError> {
-                    let request = GetSecretCodeHashRequest { escrow_id };
-                    module.handle_get_secret_code_hash(&mut context.dbtx().into_nc(), &request).await
-                }
-            },
-        ]
+        vec![api_endpoint! {
+            GET_MODULE_INFO,
+            ApiVersion::new(0, 0),
+            async |module: &Escrow, context, escrow_id: String| -> ModuleInfo {
+                module.handle_get_module_info(&mut context.dbtx().into_nc(), escrow_id).await
+            }
+        }]
     }
 }
 
@@ -343,54 +397,20 @@ impl Escrow {
     async fn handle_get_module_info(
         &self,
         dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
-        req: &GetModuleInfoRequest,
+        escrow_id: String,
     ) -> Result<ModuleInfo, ApiError> {
-        let escrow_value: Option<EscrowValue> = dbtx
-            .get_value(&EscrowKey {
-                escrow_id: req.escrow_id,
-            })
-            .await?;
-        match escrow_value {
-            Some(value) => Ok(ModuleInfo {
-                buyer: value.buyer,
-                seller: value.seller,
-                arbiter: value.arbiter,
-                amount: value.amount,
-                code_hash: value.code_hash,
-                state: value.state,
-            }),
-            None => Err(EscrowError::EscrowNotFound),
-        }
-    }
-
-    async fn handle_get_secret_code_hash(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
-        req: &GetSecretCodeHashRequest,
-    ) -> Result<[u8; 32], EscrowError> {
-        let escrow_value: Option<EscrowValue> = dbtx
-            .get_value(&EscrowKey {
-                escrow_id: req.escrow_id.clone(),
-            })
-            .await?;
-
-        match escrow_value {
-            Some(value) => Ok(value.code_hash),
-            None => Err(EscrowError::EscrowNotFound),
-        }
-    }
-
-    async fn delete_escrow_data(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        escrow_id: &str,
-    ) -> Result<(), EscrowError> {
-        let escrow_key = EscrowKey {
-            escrow_id: escrow_id.to_string(),
-        };
-
-        dbtx.remove_entry(&escrow_key).await?;
-
-        Ok(())
+        let value: EscrowValue = dbtx
+            .get_value(&EscrowKey { escrow_id })
+            .await?
+            .ok_or(EscrowError::EscrowNotFound)?;
+        Ok(ModuleInfo {
+            buyer_pubkey: value.buyer_pubkey,
+            seller_pubkey: value.seller_pubkey,
+            arbiter_pubkey: value.arbiter_pubkey,
+            amount: value.amount,
+            secret_code_hash: value.secret_code_hash,
+            state: value.state,
+            max_arbiter_fee: value.max_arbiter_fee,
+        })
     }
 }
