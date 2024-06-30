@@ -21,7 +21,8 @@ enum Command {
     Escrow {
         seller_pubkey: PublicKey, // decide on this later, hexadecimal string or bytes ?
         arbiter_pubkey: PublicKey,
-        cost: Amount, // actual cost of product
+        cost: Amount,             // actual cost of product
+        max_arbiter_fee_bps: u16, // maximum arbiter fee in basis points
     },
     EscrowInfo {
         escrow_id: String,
@@ -32,13 +33,11 @@ enum Command {
     },
     EscrowDispute {
         escrow_id: String,
-        arbiter_fee: Amount,
     },
     EscrowArbiterDecision {
         escrow_id: String,
         decision: ArbiterDecision,
-        signature: String,
-        signed_message: String,
+        arbiter_fee_bps: u16, // arbiter fee in basis points out of predecided maximum arbiters fee
     },
     BuyerClaim {
         escrow_id: String,
@@ -61,9 +60,11 @@ pub(crate) async fn handle_cli_command(
             seller_pubkey,
             arbiter_pubkey,
             cost,
+            max_arbiter_fee_bps,
         } => {
-            // Create escrow id by hashing seller, arbiter, amount
-            let escrow_id = hash256(format!("{}{}{}", seller_pubkey, arbiter_pubkey, cost));
+            // Create a random escrow id, which will only be known by the buyer, and will be
+            // shared to seller or arbiter by the buyer
+            let escrow_id: [u8; 32] = rand::random();
 
             // Generate a random secret code
             let secret_code: [u8; 32] = rand::random();
@@ -77,13 +78,14 @@ pub(crate) async fn handle_cli_command(
                     arbiter_pubkey,
                     escrow_id.clone(),
                     secret_code_hash,
+                    max_arbiter_fee_bps,
                 )
                 .await?;
 
             // If transaction is accepted and state is opened in server, share escrow ID and
             // CODE
             Ok(json!({
-                "secret-code": code, // shared by buyer out of band to seller
+                "secret-code": secret_code, // shared by buyer out of band to seller
                 "escrow-id": escrow_id, // even though unique transaction id will be assigned, escrow id will used to collectively get all data related to the escrow
                 "state": "escrow opened!"
             }))
@@ -99,7 +101,7 @@ pub(crate) async fn handle_cli_command(
                 "buyer_pubkey": response.buyer_pubkey,
                 "seller_pubkey": response.seller_pubkey,
                 "arbiter_pubkey": response.arbiter_pubkey,
-                "amount": response.amount,
+                "amount": response.amount, // this amount will be (ecash in the contract - arbiter fee)
                 "state": response.state,
                 // secret_code_hash is intentionally omitted to not expose it in the response
             }))
@@ -108,7 +110,6 @@ pub(crate) async fn handle_cli_command(
             escrow_id,
             secret_code,
         } => {
-            // seller claims ecash through finalize_and_submit txn by overfunding
             escrow
                 .claim_escrow(escrow_id, response.amount, secret_code)
                 .await?;
@@ -117,13 +118,9 @@ pub(crate) async fn handle_cli_command(
                 "status": "resolved"
             }))
         }
-        Command::EscrowDispute {
-            escrow_id,
-            arbiter_fee,
-        } => {
+        Command::EscrowDispute { escrow_id } => {
             // the arbiter will take a fee (decided off band)
-            escrow.initiate_dispute(escrow_id, arbiter_fee).await?;
-
+            escrow.initiate_dispute(escrow_id).await?;
             Ok(json!({
                 "escrow_id": escrow_id,
                 "status": "disputed!"
@@ -134,24 +131,14 @@ pub(crate) async fn handle_cli_command(
         Command::EscrowArbiterDecision {
             escrow_id,
             decision,
-            signature,
-            signed_message,
+            arbiter_fee_bps, //
         } => {
             // arbiter will decide the ecash should be given to buyer or seller and change
             // the state of escrow!
-            let response: ModuleInfo = escrow
-                .client_ctx
-                .api()
-                .request(GET_MODULE_INFO, escrow_id)
-                .await?;
-            if response.state != EscrowStates::Disputed {
-                return Err(EscrowError::EscrowNotDisputed);
-            }
-            // the arbiter can act only after the time decided by the buyer has passed
             // the arbiter will take a fee (decided off band)
             // decision has 2 values, buyer or seller.
             escrow
-                .arbiter_decision(escrow_id, decision, signature, signed_message)
+                .arbiter_decision(escrow_id, decision, signature, arbiter_fee_bps)
                 .await?;
             Ok(json!({
                 "escrow_id": escrow_id,
@@ -172,9 +159,10 @@ pub(crate) async fn handle_cli_command(
             }
             // the state should be waiting for buyer to claim the ecash as arbiter has
             // decided
-            if response.state != EscrowState::WaitingforBuyerToClaim {
+            if response.state != EscrowStates::WaitingforBuyerToClaim {
                 return Err(EscrowError::ArbiterNotDecided);
             }
+            // the amount to be claimed by buyer is the contract amount - arbiter fee
             escrow.buyer_claim(escrow_id, response.amount).await?;
             Ok(json!({
                 "escrow_id": escrow_id,
@@ -182,8 +170,21 @@ pub(crate) async fn handle_cli_command(
             }))
         }
         Command::SellerClaim { escrow_id } => {
-            // seller claims ecash through finalize_and_submit txn by overfunding
-            escrow.seller_claim(escrow_id).await?;
+            let response: ModuleInfo = escrow
+                .client_ctx
+                .api()
+                .request(GET_MODULE_INFO, escrow_id)
+                .await?;
+            if response.state == EscrowStates::Disputed {
+                return Err(EscrowError::EscrowDisputed);
+            }
+            // the state should be waiting for seller to claim the ecash as arbiter has
+            // decided
+            if response.state != EscrowStates::WaitingforSellerToClaim {
+                return Err(EscrowError::ArbiterNotDecided);
+            }
+            // the amount to be claimed by seller is the contract amount - arbiter fee
+            escrow.seller_claim(escrow_id, response.amount).await?;
             Ok(json!({
                 "escrow_id": escrow_id,
                 "status": "resolved!"

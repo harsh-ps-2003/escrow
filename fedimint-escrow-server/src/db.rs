@@ -32,6 +32,7 @@ pub struct EscrowValue {
     pub arbiter_pubkey: PublicKey,
     pub amount: Amount,
     pub secret_code_hash: String,
+    pub max_arbiter_fee: Amount,
     pub state: EscrowStates,
     pub created_at: u64,
 }

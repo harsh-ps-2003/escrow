@@ -229,6 +229,7 @@ impl ServerModule for Escrow {
                 } else {
                     return Err(EscrowError::UnauthorizedToDispute);
                 };
+
                 match escrow_value.state {
                     EscrowStates::Open => {
                         escrow_value.state = match disputer {
@@ -240,12 +241,21 @@ impl ServerModule for Escrow {
                 }
             }
             EscrowInput::ArbiterDecision(escrow_input) => {
-                // check the signature of arbiter, public key is available publicly
+                // the escrow state should be disputed for the arbiter to take decision
+                let response: ModuleInfo = escrow
+                    .client_ctx
+                    .api()
+                    .request(GET_MODULE_INFO, escrow_id)
+                    .await?;
+                if response.state != EscrowStates::Disputed {
+                    return Err(EscrowError::EscrowNotDisputed);
+                }
+                // check the signature of arbiter
                 let secp = Secp256k1::new();
                 if !secp
                     .verify(
-                        &(escrow_input.signed_message as Message),
-                        &(escrow_input.signature as Signature),
+                        &escrow_input.message,
+                        &escrow_input.signature,
                         &escrow_value.arbiter_pubkey,
                     )
                     .is_ok()
@@ -253,6 +263,15 @@ impl ServerModule for Escrow {
                     return Err(EscrowError::InvalidArbiter);
                 }
 
+                // Validate arbiter's fee
+                if escrow_input.amount > response.max_arbiter_fee {
+                    return Err(anyhow::anyhow!("Arbiter fee exceeds the maximum allowed"));
+                } else {
+                    // the contract amount is the amount of ecash in the contract - arbiter fee
+                    response.amount = response.amount - escrow_input.amount;
+                }
+
+                // Update the escrow state based on the arbiter's decision
                 match escrow_input.arbiter_decision.as_ref() {
                     ArbiterDecision::BuyerWins => {
                         escrow_value.state = EscrowStates::WaitingforBuyerToClaim;
@@ -274,6 +293,7 @@ impl ServerModule for Escrow {
             },
         }
 
+        // Update the escrow value in the database
         dbtx.insert_entry(&escrow_key, &escrow_value).await?;
         dbtx.commit().await?;
 
@@ -301,6 +321,7 @@ impl ServerModule for Escrow {
             arbiter_pubkey: output.arbiter_pubkey,
             amount: output.amount.to_string(),
             secret_code_hash: output.secret_code_hash,
+            max_arbiter_fee: output.max_arbiter_fee,
             state: EscrowStates::Open,
             created_at: chrono::Utc::now().timestamp(), // set the timestamp for escrow creation
         };
@@ -389,6 +410,7 @@ impl Escrow {
             amount: value.amount,
             secret_code_hash: value.secret_code_hash,
             state: value.state,
+            max_arbiter_fee: value.max_arbiter_fee,
         })
     }
 }

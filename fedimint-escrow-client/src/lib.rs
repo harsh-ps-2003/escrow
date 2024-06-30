@@ -12,9 +12,10 @@ use fedimint_core::module::{ApiVersion, ModuleCommon, MultiApiVersion, Transacti
 use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint};
 use fedimint_escrow_common::config::EscrowClientConfig;
 use fedimint_escrow_common::{
-    hash256, ArbiterDecision, EscrowInput, EscrowInputArbiterDecision,
-    EscrowInputClamingAfterDispute, EscrowInputDisputing, EscrowInputForClaming, EscrowInputSeller,
-    EscrowModuleTypes, EscrowOutput, KIND,
+    hash256, ArbiterDecision, EscrowInput, EscrowInputArbiterDecision, EscrowInputArbiterDecision,
+    EscrowInputClamingAfterDispute, EscrowInputClamingWithoutDispute, EscrowInputDisputing,
+    EscrowInputDisputing, EscrowInputForClaming, EscrowInputSeller, EscrowModuleTypes,
+    EscrowOutput, KIND,
 };
 use fedimint_escrow_server::EscrowStateMachine;
 use rand::{thread_rng, Rng};
@@ -98,8 +99,19 @@ impl EscrowClientModule {
         arbiter_pubkey: PublicKey,
         escrow_id: String,
         secret_code_hash: String,
+        max_arbiter_fee_bps: u16,
     ) -> anyhow::Result<(OperationId, OutPoint)> {
         let operation_id = OperationId(thread_rng().gen());
+
+        // Validate max_arbiter_fee_bps
+        if max_arbiter_fee_bps < 10 || max_arbiter_fee_bps > 1000 {
+            return Err(anyhow::anyhow!(
+                "Max arbiter fee must be between 10 and 1000 basis points"
+            ));
+        }
+
+        let fee_percentage = Decimal::from(max_arbiter_fee_bps) / Decimal::from(100);
+        let max_arbiter_fee = amount * fee_percentage / Decimal::from(100.0);
 
         let output = EscrowOutput {
             amount,
@@ -108,6 +120,7 @@ impl EscrowClientModule {
             arbiter_pubkey,
             escrow_id,
             secret_code_hash,
+            max_arbiter_fee,
         };
 
         // buyer gets statemachine as an asset to track the ecash issued!
@@ -208,13 +221,36 @@ impl EscrowClientModule {
         Ok(())
     }
 
+    /// Handles the claiming of transaction and sends the transaction to the
+    /// federation
+    pub async fn seller_claim(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
+        let operation_id = OperationId(thread_rng().gen());
+        // Transfer ecash back to buyer by underfunding the transaction
+        let input = EscrowInputClamingAfterDispute { amount };
+
+        // Build and send tx to the fed
+        // The transaction builder will create mint output to cover the input amount by
+        // itself
+        let tx = TransactionBuilder::new().with_input(self.client_ctx.make_client_input(input));
+        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
+        let (txid, change) = self
+            .client_ctx
+            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
+            .await?;
+
+        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
+
+        tx_subscription
+            .await_tx_accepted(txid)
+            .await
+            .map_err(|e| anyhow!(e))?;
+
+        Ok(())
+    }
+
     /// Handles the initiate dispute transaction and sends the transaction to
     /// the federation for EscrowDispute command
-    pub async fn initiate_dispute(
-        &self,
-        escrow_id: String,
-        arbiter_fee: Amount,
-    ) -> anyhow::Result<()> {
+    pub async fn initiate_dispute(&self, escrow_id: String) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
 
         let escrow_info: ModuleInfo = self
@@ -224,7 +260,7 @@ impl EscrowClientModule {
             .await?;
 
         let input = EscrowInputDisputing {
-            amount: arbiter_fee,
+            amount: Amount::ZERO,
             disputer: self.key.public_key(), // the public key of the person who is disputing
         };
 
@@ -255,7 +291,7 @@ impl EscrowClientModule {
         escrow_id: String,
         decision: String,
         signature: String,
-        signed_message: String,
+        arbiter_fee_bps: u16,
     ) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
 
@@ -265,12 +301,27 @@ impl EscrowClientModule {
             _ => return Err(EscrowError::InvalidArbiterDecision),
         };
 
+        // produce the signature using the private key and the decision
+        // Create a message from the decision
+        let message = Message::from_hashed_data::<sha256::Hash>(decision.as_bytes());
+        // Sign the message using Schnorr signature
+        let signature = secp.sign_schnorr(&message, &self.key);
+
+        let escrow_info: ModuleInfo = self
+            .client_ctx
+            .api()
+            .request(GET_MODULE_INFO, escrow_id.clone())
+            .await?;
+
+        let fee_percentage = Decimal::from(arbiter_fee_bps) / Decimal::from(100);
+        let arbiter_fee = escrow_info.amount * fee_percentage / Decimal::from(100.0);
+
         // Transfer ecash back to buyer by underfunding the transaction
         let input = EscrowInputArbiterDecision {
-            amount: Amount::ZERO,
+            amount: arbiter_fee,
             arbiter_decision,
-            signed_message,
-            signature,
+            signature: signature,
+            message: message,
         };
 
         // Build and send tx to the fed

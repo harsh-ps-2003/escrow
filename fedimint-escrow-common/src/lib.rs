@@ -8,7 +8,7 @@ use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
 use fedimint_core::{plugin_types_trait_impl_common, Amount};
 use hex;
-use secp256k1::PublicKey;
+use secp256k1::{Message, PublicKey, Signature};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -92,8 +92,8 @@ pub struct EscrowInputClamingAfterDispute {
 pub struct EscrowInputArbiterDecision {
     pub amount: Amount,
     pub arbiter_decision: ArbiterDecision,
-    pub signed_message: String,
-    pub signature: String,
+    pub signature: Signature,
+    pub message: Message,
 }
 
 /// The output for the escrow module
@@ -105,6 +105,7 @@ pub struct EscrowOutput {
     pub arbiter_pubkey: PublicKey,
     pub escrow_id: String,
     pub secret_code_hash: String,
+    pub max_arbiter_fee: Amount,
 }
 
 /// Errors that might be returned by the server when the buyer awaits guardians

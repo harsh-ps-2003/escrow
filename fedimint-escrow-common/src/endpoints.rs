@@ -16,4 +16,5 @@ pub struct ModuleInfo {
     pub amount: Amount,
     pub secret_code_hash: String,
     pub state: EscrowStates,
+    pub max_arbiter_fee: Amount,
 }

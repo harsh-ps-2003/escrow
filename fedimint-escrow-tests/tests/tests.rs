@@ -123,7 +123,7 @@ async fn can_dispute_and_resolve_escrow_in_favor_of_buyer() -> anyhow::Result<()
         setup_test_env().await?;
 
     // Buyer disputes escrow
-    buyer_escrow.initiate_dispute(escrow_id, sats(100)).await?;
+    buyer_escrow.initiate_dispute(escrow_id).await?;
 
     // Arbiter resolves dispute in favor of buyer
     arbiter_escrow.arbiter_decision(escrow_id, "buyer").await?;
@@ -146,7 +146,7 @@ async fn can_dispute_and_resolve_escrow_in_favor_of_seller() -> anyhow::Result<(
         setup_test_env().await?;
 
     // Buyer disputes escrow
-    buyer_escrow.initiate_dispute(escrow_id, sats(100)).await?;
+    buyer_escrow.initiate_dispute(escrow_id).await?;
 
     // Arbiter resolves dispute in favor of buyer
     arbiter_escrow.arbiter_decision(escrow_id, "seller").await?;
@@ -185,7 +185,7 @@ async fn claim_fails_when_disputed() -> anyhow::Result<()> {
         setup_test_env().await?;
 
     // Buyer disputes escrow
-    buyer_escrow.initiate_dispute(escrow_id, sats(100)).await?;
+    buyer_escrow.initiate_dispute(escrow_id).await?;
 
     // Seller tries to claim
     let res = seller_escrow
