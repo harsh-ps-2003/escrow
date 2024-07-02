@@ -165,19 +165,57 @@ impl CommonModuleInit for EscrowCommonInit {
 
 impl fmt::Display for EscrowClientConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "EscrowClientConfig")
+        write!(
+            f,
+            "EscrowClientConfig {{ deposit_fee: {} }}",
+            self.deposit_fee
+        )
     }
 }
 
 impl fmt::Display for EscrowInput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "EscrowInput: {}", self.amount)
+        match self {
+            EscrowInput::ClamingWithoutDispute(input) => write!(
+                f,
+                "EscrowInput::ClamingWithoutDispute {{ amount: {}, secret_code: {} }}",
+                input.amount, input.secret_code
+            ),
+            EscrowInput::Disputing(input) => write!(
+                f,
+                "EscrowInput::Disputing {{ amount: {}, disputer: {:?} }}",
+                input.amount, input.disputer
+            ),
+            EscrowInput::ClamingAfterDispute(input) => write!(
+                f,
+                "EscrowInput::ClamingAfterDispute {{ amount: {} }}",
+                input.amount
+            ),
+            EscrowInput::ArbiterDecision(input) => write!(
+                f,
+                "EscrowInput::ArbiterDecision {{ amount: {}, decision: {:?}, signature: {}, message: {} }}",
+                input.amount,
+                input.arbiter_decision,
+                hex::encode(&input.signature.serialize_compact()),
+                hex::encode(&input.message.serialize())
+            ),
+        }
     }
 }
 
 impl fmt::Display for EscrowOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "EscrowOutput: {}", self.amount)
+        write!(
+            f,
+            "EscrowOutput {{ amount: {}, buyer_pubkey: {:?}, seller_pubkey: {:?}, arbiter_pubkey: {:?}, escrow_id: {}, secret_code_hash: {}, max_arbiter_fee: {} }}",
+            self.amount,
+            self.buyer_pubkey,
+            self.seller_pubkey,
+            self.arbiter_pubkey,
+            self.escrow_id,
+            self.secret_code_hash,
+            self.max_arbiter_fee
+        )
     }
 }
 

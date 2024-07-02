@@ -286,6 +286,7 @@ impl ServerModule for Escrow {
             EscrowInput::ClaimingAfterDispute(escrow_input) => match escrow_value.state {
                 EscrowStates::WaitingforBuyerToClaim => {
                     escrow_value.state = EscrowStates::ResolvedWithDispute;
+                    // by default the claimer is the seller
                     claimer = escrow_value.buyer_pubkey;
                 }
                 EscrowStates::WaitingforSellerToClaim => {
