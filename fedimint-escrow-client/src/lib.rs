@@ -59,7 +59,7 @@ impl ClientModule for EscrowClientModule {
         }
     }
 
-    // conveys the monetary value of escrow input
+    /// conveys the monetary value of escrow input
     fn input_amount(
         &self,
         input: &<Self::Common as ModuleCommon>::Input,
@@ -70,8 +70,8 @@ impl ClientModule for EscrowClientModule {
         })
     }
 
-    // conveys to the transaction the monetary value of escrow output so as to burn
-    // the equivalent ecash
+    /// conveys to the transaction the monetary value of escrow output so as to
+    /// burn the equivalent ecash
     fn output_amount(
         &self,
         output: &<Self::Common as ModuleCommon>::Output,
@@ -93,8 +93,7 @@ impl ClientModule for EscrowClientModule {
 }
 
 impl EscrowClientModule {
-    /// Handles the buyer transaction and sends the transaction to the
-    /// federation for escrow command
+    /// Handles the buyer transaction for the escrow creation
     pub async fn create_escrow(
         &self,
         amount: Amount,
@@ -106,12 +105,17 @@ impl EscrowClientModule {
     ) -> anyhow::Result<(OperationId, OutPoint)> {
         let operation_id = OperationId(thread_rng().gen());
 
-        // Validate max_arbiter_fee_bps
-        self.consensus_cfg.limit_max_arbiter_fee_bps();
+        // Validate max_arbiter_fee_bps (should be in range 10 to 1000)
+        if let Err(e) = self.consensus_cfg.limit_max_arbiter_fee_bps() {
+            return Err(anyhow::anyhow!("Invalid max_arbiter_fee_bps: {}", e));
+        }
 
+        // converting bps to percentage
         let fee_percentage = Decimal::from(max_arbiter_fee_bps) / Decimal::from(100);
-        let max_arbiter_fee = amount * fee_percentage / Decimal::from(100.0);
+        // getting the maximum arbiter fee that can be charged
+        let max_arbiter_fee: Amount = Decimal::from(amount) * fee_percentage / Decimal::from(100);
 
+        // creating output for buyers transaction by underfunding
         let output = EscrowOutput {
             amount,
             buyer_pubkey: self.key.public_key(),
@@ -154,8 +158,8 @@ impl EscrowClientModule {
         Ok((operation_id, change[0]))
     }
 
-    /// Handles the seller transaction and sends the transaction to the
-    /// federation for EscrowClaim command
+    /// Handles the seller transaction to claim the funds that are locked in the
+    /// escrow upon providing the secret code
     pub async fn claim_escrow(
         &self,
         escrow_id: String,
@@ -169,6 +173,7 @@ impl EscrowClientModule {
             .api()
             .request(GET_MODULE_INFO, escrow_id)
             .await?;
+        // the escrow should not be in dispute when seller wants to claim
         if escrow_value.state == EscrowStates::Disputed {
             return Err(EscrowError::EscrowDisputed);
         }
@@ -213,8 +218,8 @@ impl EscrowClientModule {
         Ok(())
     }
 
-    /// Handles the claiming of transaction and sends the transaction to the
-    /// federation
+    /// Handles the claiming of ecash by the buyer after the arbiter has decided
+    /// that buyer won the dispute
     pub async fn buyer_claim(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
 
@@ -223,8 +228,9 @@ impl EscrowClientModule {
             .api()
             .request(GET_MODULE_INFO, escrow_id)
             .await?;
+        // the arbiter has not decided yet if the escrow is disputed!
         if escrow_value.state == EscrowStates::Disputed {
-            return Err(EscrowError::EscrowDisputed);
+            return Err(EscrowError::ArbiterNotDecided);
         }
         // the state should be waiting for buyer to claim the ecash as arbiter has
         // decided
@@ -232,7 +238,8 @@ impl EscrowClientModule {
             return Err(EscrowError::ArbiterNotDecided);
         }
 
-        // Transfer ecash back to buyer by underfunding the transaction
+        // Transfer ecash back to buyer after deduction of arbiter fee by underfunding
+        // the transaction
         let input = EscrowInputClamingAfterDispute { amount };
 
         // Build and send tx to the fed
@@ -265,8 +272,8 @@ impl EscrowClientModule {
         Ok(())
     }
 
-    /// Handles the claiming of transaction and sends the transaction to the
-    /// federation
+    /// Handles the claiming of transaction by the seller after the arbiter has
+    /// decided that seller won the dispute
     pub async fn seller_claim(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
 
@@ -275,8 +282,9 @@ impl EscrowClientModule {
             .api()
             .request(GET_MODULE_INFO, escrow_id)
             .await?;
+        // the arbiter has not decided yet if the escrow is disputed!
         if escrow_value.state == EscrowStates::Disputed {
-            return Err(EscrowError::EscrowDisputed);
+            return Err(EscrowError::ArbiterNotDecided);
         }
         // the state should be waiting for seller to claim the ecash as arbiter has
         // decided
@@ -317,8 +325,7 @@ impl EscrowClientModule {
         Ok(())
     }
 
-    /// Handles the initiate dispute transaction and sends the transaction to
-    /// the federation for EscrowDispute command
+    /// Handles the initiation of dispute
     pub async fn initiate_dispute(&self, escrow_id: String) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
 
@@ -363,8 +370,7 @@ impl EscrowClientModule {
         Ok(())
     }
 
-    /// Handles the arbiter transaction and sends the transaction to the
-    /// federation for EscrowArbiterDecision command
+    /// Handles the arbiter decision making on who won the dispute
     pub async fn arbiter_decision(
         &self,
         escrow_id: String,
@@ -392,8 +398,11 @@ impl EscrowClientModule {
             .request(GET_MODULE_INFO, escrow_id.clone())
             .await?;
 
+        // getting percentage from basis points
         let fee_percentage = Decimal::from(arbiter_fee_bps) / Decimal::from(100);
-        let arbiter_fee = escrow_value.amount * fee_percentage / Decimal::from(100.0);
+        // calculating arbiter fee
+        let arbiter_fee: Amount =
+            Decimal::from(escrow_value.amount * fee_percentage) / Decimal::from(100);
 
         // Transfer ecash back to buyer by underfunding the transaction
         let input = EscrowInputArbiterDecision {
@@ -433,6 +442,7 @@ impl EscrowClientModule {
         Ok(())
     }
 
+    /// Subscribes to the transaction updates and yields the state of operation
     pub async fn subscribe_transactions(
         &self,
         operation_id: OperationId,

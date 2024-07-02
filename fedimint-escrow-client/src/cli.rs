@@ -6,13 +6,12 @@ use chrono::prelude::*;
 use clap::Parser;
 use fedimint_core::Amount;
 use fedimint_escrow_common::endpoints::ModuleInfo;
-use fedimint_escrow_common::EscrowClientModule;
 use secp256k1::PublicKey;
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use super::EscrowStates;
+use super::{EscrowClientModule, EscrowStates};
 use crate::api::EscrowFederationApi;
 
 // TODO: we need cli-commands as well as API endpoints for these commands!
@@ -110,7 +109,7 @@ pub(crate) async fn handle_cli_command(
             secret_code,
         } => {
             // get escrow info corresponding to the id from db using federation api
-            let escrow_value: ModuleInfo = escrow
+            let escrow_value: ModuleInfo = self
                 .client_ctx
                 .api()
                 .request(GET_MODULE_INFO, escrow_id)
@@ -138,7 +137,7 @@ pub(crate) async fn handle_cli_command(
         Command::EscrowArbiterDecision {
             escrow_id,
             decision,
-            arbiter_fee_bps, //
+            arbiter_fee_bps,
         } => {
             // arbiter will decide the ecash should be given to buyer or seller and change
             // the state of escrow!

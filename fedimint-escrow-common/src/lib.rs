@@ -30,38 +30,52 @@ pub struct EscrowConsensusItem;
 
 impl std::fmt::Display for EscrowConsensusItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "EscrowConsensusItem")
+        unimplemented!()
     }
 }
 
 /// The states for the escrow module
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable, Serialize, Deserialize)]
 pub enum EscrowStates {
+    /// the escrow is created and not claimed by buyer or seller, thus its open
     Open,
+    /// the escrow is resolved without dispute
     ResolvedWithoutDispute,
+    /// the escrow is resolved with dispute
     ResolvedWithDispute,
+    /// the escrow is disputed by buyer
     DisputedByBuyer,
+    /// the escrow is disputed by seller
     DisputedBySeller,
+    /// buyer has won the dispute and has to claim the escrow
     WaitingforBuyerToClaim,
+    /// seller has won the dispute and has to claim the escrow
     WaitingforSellerToClaim,
 }
 
+/// The disputer in the escrow, can either be buyer or the seller
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum Disputer {
     Buyer,
     Seller,
 }
 
+/// The arbiter decision on who won the dispute, either the buyer or the seller
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum ArbiterDecision {
     BuyerWins,
     SellerWins,
 }
 
+/// The input for the escrow module
 pub enum EscrowInput {
+    /// The input when seller is claiming the escrow without any dispute
     ClamingWithoutDispute(EscrowInputClamingWithoutDispute),
+    /// The input when buyer or seller is disputing the escrow
     Disputing(EscrowInputDisputing),
+    /// The input when buyer or seller is claiming the escrow after the dispute
     ClamingAfterDispute(EscrowInputClamingAfterDispute),
+    /// The input when arbiter is deciding who won the dispute
     ArbiterDecision(EscrowInputArbiterDecision),
 }
 /// The input for the escrow module when the seller is claiming the escrow using
@@ -111,8 +125,11 @@ pub struct EscrowOutput {
 /// The high level state for tracking operations of transactions
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum EscrowOperationState {
+    /// The transaction is being processed by the federation
     Created,
+    /// The transaction is accepted by the federation
     Accepted,
+    /// The transaction is rejected by the federation
     Rejected,
 }
 
