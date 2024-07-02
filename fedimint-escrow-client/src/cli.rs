@@ -103,7 +103,6 @@ pub(crate) async fn handle_cli_command(
                 "arbiter_pubkey": escrow_value.arbiter_pubkey,
                 "amount": escrow_value.amount, // this amount will be (ecash in the contract - arbiter fee)
                 "state": escrow_value.state,
-                // secret_code_hash is intentionally omitted to not expose it in the response
             }))
         }
         Command::EscrowClaim {
@@ -117,6 +116,7 @@ pub(crate) async fn handle_cli_command(
                 .request(GET_MODULE_INFO, escrow_id)
                 .await?;
 
+            // arbiter fee is 0 in this case!
             escrow
                 .claim_escrow(escrow_id, escrow_value.amount, secret_code)
                 .await?;
@@ -153,22 +153,6 @@ pub(crate) async fn handle_cli_command(
             }))
         }
         Command::BuyerClaim { escrow_id } => {
-            // buyer can retreat the escrow if the seller doesn't act within a time period!
-            // also when the arbiter decides the ecash should be given to buyer, this
-            // command would be used!
-            let escrow_value: ModuleInfo = escrow
-                .client_ctx
-                .api()
-                .request(GET_MODULE_INFO, escrow_id)
-                .await?;
-            if escrow_value.state == EscrowStates::Disputed {
-                return Err(EscrowError::EscrowDisputed);
-            }
-            // the state should be waiting for buyer to claim the ecash as arbiter has
-            // decided
-            if escrow_value.state != EscrowStates::WaitingforBuyerToClaim {
-                return Err(EscrowError::ArbiterNotDecided);
-            }
             // the amount to be claimed by buyer is the contract amount - arbiter fee
             escrow.buyer_claim(escrow_id, escrow_value.amount).await?;
             Ok(json!({
@@ -177,19 +161,6 @@ pub(crate) async fn handle_cli_command(
             }))
         }
         Command::SellerClaim { escrow_id } => {
-            let escrow_value: ModuleInfo = escrow
-                .client_ctx
-                .api()
-                .request(GET_MODULE_INFO, escrow_id)
-                .await?;
-            if escrow_value.state == EscrowStates::Disputed {
-                return Err(EscrowError::EscrowDisputed);
-            }
-            // the state should be waiting for seller to claim the ecash as arbiter has
-            // decided
-            if escrow_value.state != EscrowStates::WaitingforSellerToClaim {
-                return Err(EscrowError::ArbiterNotDecided);
-            }
             // the amount to be claimed by seller is the contract amount - arbiter fee
             escrow.seller_claim(escrow_id, escrow_value.amount).await?;
             Ok(json!({

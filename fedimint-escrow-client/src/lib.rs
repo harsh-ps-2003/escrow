@@ -217,6 +217,21 @@ impl EscrowClientModule {
     /// federation
     pub async fn buyer_claim(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
+
+        let escrow_value: ModuleInfo = self
+            .client_ctx
+            .api()
+            .request(GET_MODULE_INFO, escrow_id)
+            .await?;
+        if escrow_value.state == EscrowStates::Disputed {
+            return Err(EscrowError::EscrowDisputed);
+        }
+        // the state should be waiting for buyer to claim the ecash as arbiter has
+        // decided
+        if escrow_value.state != EscrowStates::WaitingforBuyerToClaim {
+            return Err(EscrowError::ArbiterNotDecided);
+        }
+
         // Transfer ecash back to buyer by underfunding the transaction
         let input = EscrowInputClamingAfterDispute { amount };
 
@@ -254,6 +269,21 @@ impl EscrowClientModule {
     /// federation
     pub async fn seller_claim(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
+
+        let escrow_value: ModuleInfo = self
+            .client_ctx
+            .api()
+            .request(GET_MODULE_INFO, escrow_id)
+            .await?;
+        if escrow_value.state == EscrowStates::Disputed {
+            return Err(EscrowError::EscrowDisputed);
+        }
+        // the state should be waiting for seller to claim the ecash as arbiter has
+        // decided
+        if escrow_value.state != EscrowStates::WaitingforSellerToClaim {
+            return Err(EscrowError::ArbiterNotDecided);
+        }
+
         // Transfer ecash back to buyer by underfunding the transaction
         let input = EscrowInputClamingAfterDispute { amount };
 
