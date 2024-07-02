@@ -20,6 +20,7 @@ pub struct EscrowGenParamsLocal;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EscrowGenParamsConsensus {
     pub deposit_fee: Amount,
+    pub max_arbiter_fee_bps: u16,
 }
 
 impl Default for EscrowGenParams {
@@ -28,6 +29,7 @@ impl Default for EscrowGenParams {
             local: EscrowGenParamsLocal,
             consensus: EscrowGenParamsConsensus {
                 deposit_fee: Amount::ZERO,
+                max_arbiter_fee_bps: 0,
             },
         }
     }
@@ -57,6 +59,17 @@ pub struct EscrowConfigLocal;
 pub struct EscrowConfigConsensus {
     /// Will be the same for all peers
     pub deposit_fee: Amount,
+    pub max_arbiter_fee_bps: u16,
+}
+
+impl EscrowConfigConsensus {
+    pub fn limit_max_arbiter_fee_bps(&self) -> u16 {
+        // the max_arbiter_fee_bps should be in range 10 (0.1%) to 1000 (10%)
+        if self.max_arbiter_fee_bps < 10 || self.max_arbiter_fee_bps > 1000 {
+            Err(EscrowError::InvalidMaxArbiterFeeBps);
+        }
+        self.max_arbiter_fee_bps
+    }
 }
 
 /// Will be encrypted and not shared such as private key material

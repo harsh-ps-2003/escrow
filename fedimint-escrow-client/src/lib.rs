@@ -4,20 +4,22 @@ use anyhow::{anyhow, Context as _};
 use fedimint_client::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client::module::recovery::NoModuleBackup;
 use fedimint_client::module::{ClientContext, ClientModule};
+use fedimint_client::oplog::UpdateStreamOrOutcome;
 use fedimint_client::sm::{Context, ModuleNotifier};
 use fedimint_client::transaction::{ClientInput, ClientOutput, TransactionBuilder};
 use fedimint_core::core::{Decoder, KeyPair, OperationId};
 use fedimint_core::db::Database;
 use fedimint_core::module::{ApiVersion, ModuleCommon, MultiApiVersion, TransactionItemAmount};
-use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint};
-use fedimint_escrow_common::config::EscrowClientConfig;
+use fedimint_core::{apply, async_trait_maybe_send, Amount, Amount, OutPoint, TransactionId};
+use fedimint_escrow_common::config::{EscrowClientConfig, EscrowConfigConsensus};
 use fedimint_escrow_common::{
     hash256, ArbiterDecision, EscrowInput, EscrowInputArbiterDecision, EscrowInputArbiterDecision,
     EscrowInputClamingAfterDispute, EscrowInputClamingWithoutDispute, EscrowInputDisputing,
     EscrowInputDisputing, EscrowInputForClaming, EscrowInputSeller, EscrowModuleTypes,
-    EscrowOutput, KIND,
+    EscrowOperationState, EscrowOutput, KIND,
 };
-use fedimint_escrow_server::EscrowStateMachine;
+use fedimint_escrow_server::{EscrowError, EscrowStateMachine};
+use futures::StreamExt;
 use rand::{thread_rng, Rng};
 use secp256k1::PublicKey;
 
@@ -27,6 +29,7 @@ pub mod cli;
 #[derive(Debug)]
 pub struct EscrowClientModule {
     cfg: EscrowClientConfig,
+    consensus_cfg: EscrowConfigConsensus,
     key: KeyPair,
     notifier: ModuleNotifier<EscrowStateMachine>,
     client_ctx: ClientContext<Self>,
@@ -104,11 +107,7 @@ impl EscrowClientModule {
         let operation_id = OperationId(thread_rng().gen());
 
         // Validate max_arbiter_fee_bps
-        if max_arbiter_fee_bps < 10 || max_arbiter_fee_bps > 1000 {
-            return Err(anyhow::anyhow!(
-                "Max arbiter fee must be between 10 and 1000 basis points"
-            ));
-        }
+        self.consensus_cfg.limit_max_arbiter_fee_bps();
 
         let fee_percentage = Decimal::from(max_arbiter_fee_bps) / Decimal::from(100);
         let max_arbiter_fee = amount * fee_percentage / Decimal::from(100.0);
@@ -135,12 +134,22 @@ impl EscrowClientModule {
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
-        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
-
-        tx_subscription
-            .await_tx_accepted(txid)
+        // Subscribe to transaction updates
+        let updates = self
+            .subscribe_transactions(operation_id, txid)
             .await
-            .map_err(|e| anyhow!(e))?;
+            .unwrap()
+            .into_stream();
+
+        // Process the update stream
+        while let Some(update) = updates.next().await {
+            match update {
+                EscrowOperationState::Created | EscrowOperationState::Accepted => {}
+                EscrowOperationState::Rejected => {
+                    return Err(EscrowError::TransactionRejected);
+                }
+            }
+        }
 
         Ok((operation_id, change[0]))
     }
@@ -155,15 +164,15 @@ impl EscrowClientModule {
     ) -> anyhow::Result<()> {
         // make an api call to server db and get the secret code hash and state of
         // escrow, and then verify it
-        let response: [u8; 32] = self
+        let escrow_value: [u8; 32] = self
             .client_ctx
             .api()
             .request(GET_MODULE_INFO, escrow_id)
             .await?;
-        if response.state == EscrowStates::Disputed {
+        if escrow_value.state == EscrowStates::Disputed {
             return Err(EscrowError::EscrowDisputed);
         }
-        if response.state != EscrowState::WaitingforSellerToClaim || EscrowState::Open {
+        if escrow_value.state != EscrowState::WaitingforSellerToClaim || EscrowState::Open {
             return Err(EscrowError::ArbiterNotDecided);
         }
         let operation_id = OperationId(thread_rng().gen());
@@ -184,12 +193,22 @@ impl EscrowClientModule {
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
-        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
-
-        tx_subscription
-            .await_tx_accepted(txid)
+        // Subscribe to transaction updates
+        let updates = self
+            .subscribe_transactions(operation_id, txid)
             .await
-            .map_err(|e| anyhow!(e))?;
+            .unwrap()
+            .into_stream();
+
+        // Process the update stream
+        while let Some(update) = updates.next().await {
+            match update {
+                EscrowOperationState::Created | EscrowOperationState::Accepted => {}
+                EscrowOperationState::Rejected => {
+                    return Err(EscrowError::TransactionRejected);
+                }
+            }
+        }
 
         Ok(())
     }
@@ -211,12 +230,22 @@ impl EscrowClientModule {
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
-        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
-
-        tx_subscription
-            .await_tx_accepted(txid)
+        // Subscribe to transaction updates
+        let updates = self
+            .subscribe_transactions(operation_id, txid)
             .await
-            .map_err(|e| anyhow!(e))?;
+            .unwrap()
+            .into_stream();
+
+        // Process the update stream
+        while let Some(update) = updates.next().await {
+            match update {
+                EscrowOperationState::Created | EscrowOperationState::Accepted => {}
+                EscrowOperationState::Rejected => {
+                    return Err(EscrowError::TransactionRejected);
+                }
+            }
+        }
 
         Ok(())
     }
@@ -238,12 +267,22 @@ impl EscrowClientModule {
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
-        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
-
-        tx_subscription
-            .await_tx_accepted(txid)
+        // Subscribe to transaction updates
+        let updates = self
+            .subscribe_transactions(operation_id, txid)
             .await
-            .map_err(|e| anyhow!(e))?;
+            .unwrap()
+            .into_stream();
+
+        // Process the update stream
+        while let Some(update) = updates.next().await {
+            match update {
+                EscrowOperationState::Created | EscrowOperationState::Accepted => {}
+                EscrowOperationState::Rejected => {
+                    return Err(EscrowError::TransactionRejected);
+                }
+            }
+        }
 
         Ok(())
     }
@@ -253,7 +292,7 @@ impl EscrowClientModule {
     pub async fn initiate_dispute(&self, escrow_id: String) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
 
-        let escrow_info: ModuleInfo = self
+        let escrow_value: ModuleInfo = self
             .client_ctx
             .api()
             .request(GET_MODULE_INFO, escrow_id.clone())
@@ -274,12 +313,22 @@ impl EscrowClientModule {
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
-        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
-
-        tx_subscription
-            .await_tx_accepted(txid)
+        // Subscribe to transaction updates
+        let updates = self
+            .subscribe_transactions(operation_id, txid)
             .await
-            .map_err(|e| anyhow!(e))?;
+            .unwrap()
+            .into_stream();
+
+        // Process the update stream
+        while let Some(update) = updates.next().await {
+            match update {
+                EscrowOperationState::Created | EscrowOperationState::Accepted => {}
+                EscrowOperationState::Rejected => {
+                    return Err(EscrowError::TransactionRejected);
+                }
+            }
+        }
 
         Ok(())
     }
@@ -307,14 +356,14 @@ impl EscrowClientModule {
         // Sign the message using Schnorr signature
         let signature = secp.sign_schnorr(&message, &self.key);
 
-        let escrow_info: ModuleInfo = self
+        let escrow_value: ModuleInfo = self
             .client_ctx
             .api()
             .request(GET_MODULE_INFO, escrow_id.clone())
             .await?;
 
         let fee_percentage = Decimal::from(arbiter_fee_bps) / Decimal::from(100);
-        let arbiter_fee = escrow_info.amount * fee_percentage / Decimal::from(100.0);
+        let arbiter_fee = escrow_value.amount * fee_percentage / Decimal::from(100.0);
 
         // Transfer ecash back to buyer by underfunding the transaction
         let input = EscrowInputArbiterDecision {
@@ -334,14 +383,45 @@ impl EscrowClientModule {
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
-        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
-
-        tx_subscription
-            .await_tx_accepted(txid)
+        // Subscribe to transaction updates
+        let updates = self
+            .subscribe_transactions(operation_id, txid)
             .await
-            .map_err(|e| anyhow!(e))?;
+            .unwrap()
+            .into_stream();
+
+        // Process the update stream
+        while let Some(update) = updates.next().await {
+            match update {
+                EscrowOperationState::Created | EscrowOperationState::Accepted => {}
+                EscrowOperationState::Rejected => {
+                    return Err(EscrowError::TransactionRejected);
+                }
+            }
+        }
 
         Ok(())
+    }
+
+    pub async fn subscribe_transactions(
+        &self,
+        operation_id: OperationId,
+        txid: TransactionId,
+    ) -> anyhow::Result<UpdateStreamOrOutcome<EscrowOperationState>> {
+        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
+
+        Ok(stream! {
+            yield EscrowOperationState::Created;
+
+            match tx_subscription.await_tx_accepted(txid).await {
+                Ok(()) => {
+                    yield EscrowOperationState::Accepted;
+                },
+                Err(_) => {
+                    yield EscrowOperationState::Rejected;
+                }
+            }
+        })
     }
 
     // /// Request the federation prints money for us for using in test
@@ -376,6 +456,7 @@ impl ClientModuleInit for EscrowClientInit {
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
         Ok(EscrowClientModule {
             cfg: args.cfg().clone(),
+            consensus_cfg: args.cfg().consensus_cfg.clone(),
             key: args
                 .module_root_secret()
                 .clone()

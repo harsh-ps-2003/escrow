@@ -115,6 +115,7 @@ impl ServerModuleInit for EscrowInit {
                     private: EscrowConfigPrivate,
                     consensus: EscrowConfigConsensus {
                         deposit_fee: params.consensus.deposit_fee,
+                        max_arbiter_fee_bps: params.consensus.max_arbiter_fee_bps,
                     },
                 };
                 (peer, config.to_erased())
@@ -135,6 +136,7 @@ impl ServerModuleInit for EscrowInit {
             private: EscrowConfigPrivate,
             consensus: EscrowConfigConsensus {
                 deposit_fee: params.consensus.deposit_fee,
+                max_arbiter_fee_bps: params.consensus.max_arbiter_fee_bps,
             },
         }
         .to_erased())
@@ -242,12 +244,12 @@ impl ServerModule for Escrow {
             }
             EscrowInput::ArbiterDecision(escrow_input) => {
                 // the escrow state should be disputed for the arbiter to take decision
-                let response: ModuleInfo = escrow
+                let escrow_value: ModuleInfo = escrow
                     .client_ctx
                     .api()
                     .request(GET_MODULE_INFO, escrow_id)
                     .await?;
-                if response.state != EscrowStates::Disputed {
+                if escrow_value.state != EscrowStates::Disputed {
                     return Err(EscrowError::EscrowNotDisputed);
                 }
                 // check the signature of arbiter
@@ -264,11 +266,11 @@ impl ServerModule for Escrow {
                 }
 
                 // Validate arbiter's fee
-                if escrow_input.amount > response.max_arbiter_fee {
+                if escrow_input.amount > escrow_value.max_arbiter_fee {
                     return Err(anyhow::anyhow!("Arbiter fee exceeds the maximum allowed"));
                 } else {
                     // the contract amount is the amount of ecash in the contract - arbiter fee
-                    response.amount = response.amount - escrow_input.amount;
+                    escrow_value.amount = escrow_value.amount - escrow_input.amount;
                 }
 
                 // Update the escrow state based on the arbiter's decision
@@ -399,18 +401,19 @@ impl Escrow {
         dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
         escrow_id: String,
     ) -> Result<ModuleInfo, ApiError> {
-        let value: EscrowValue = dbtx
+        let escrow_value: EscrowValue = dbtx
             .get_value(&EscrowKey { escrow_id })
             .await?
             .ok_or(EscrowError::EscrowNotFound)?;
         Ok(ModuleInfo {
-            buyer_pubkey: value.buyer_pubkey,
-            seller_pubkey: value.seller_pubkey,
-            arbiter_pubkey: value.arbiter_pubkey,
-            amount: value.amount,
-            secret_code_hash: value.secret_code_hash,
-            state: value.state,
-            max_arbiter_fee: value.max_arbiter_fee,
+            buyer_pubkey: escrow_value.buyer_pubkey,
+            seller_pubkey: escrow_value.seller_pubkey,
+            arbiter_pubkey: escrow_value.arbiter_pubkey,
+            amount: escrow_value.amount,
+            secret_code_hash: escrow_value.secret_code_hash,
+            state: escrow_value.state,
+            max_arbiter_fee: escrow_value.max_arbiter_fee,
+            created_at: escrow_value.created_at,
         })
     }
 }

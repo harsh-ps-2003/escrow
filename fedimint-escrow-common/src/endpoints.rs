@@ -17,4 +17,5 @@ pub struct ModuleInfo {
     pub secret_code_hash: String,
     pub state: EscrowStates,
     pub max_arbiter_fee: Amount,
+    pub created_at: i64,
 }

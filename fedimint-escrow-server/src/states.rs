@@ -99,4 +99,8 @@ pub enum EscrowError {
     InvalidArbiter,
     #[error("Invalid arbiter decision, either the winner can be the buyer or the seller")]
     InvalidArbiterDecision,
+    #[error("Invalid max arbiter fee in bps, it should be in range 10 to 1000")]
+    InvalidMaxArbiterFeeBps,
+    #[error("Transaction was rejected")]
+    TransactionRejected,
 }

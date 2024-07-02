@@ -53,6 +53,7 @@ async fn setup_test_env() -> anyhow::Result<(
             arbiter.public_key(),
             escrow_id,
             secret_code_hash,
+            20,
         )
         .await?;
 
@@ -80,7 +81,7 @@ async fn get_module_info_returns_expected() -> anyhow::Result<()> {
     ];
 
     // Call the handle_cli_command function from cli.rs
-    let response = handle_cli_command(&buyer_escrow, &args).await?;
+    let escrow_value = handle_cli_command(&buyer_escrow, &args).await?;
 
     // expected JSON response
     let expected_json = json!({

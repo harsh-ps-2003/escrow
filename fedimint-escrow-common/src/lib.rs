@@ -3,7 +3,7 @@ pub mod endpoints;
 use std::fmt;
 
 use config::EscrowClientConfig;
-use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
+use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
 use fedimint_core::{plugin_types_trait_impl_common, Amount};
@@ -106,6 +106,14 @@ pub struct EscrowOutput {
     pub escrow_id: String,
     pub secret_code_hash: String,
     pub max_arbiter_fee: Amount,
+}
+
+/// The high level state for tracking operations of transactions
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum EscrowOperationState {
+    Created,
+    Accepted,
+    Rejected,
 }
 
 /// Errors that might be returned by the server when the buyer awaits guardians
