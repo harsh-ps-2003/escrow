@@ -2,10 +2,12 @@ mod db;
 mod states;
 
 use std::collections::BTreeMap;
+use std::time::SystemTime;
 
 use anyhow::bail;
 use async_trait::async_trait;
-use chrono::prelude::*;
+use bitcoin::secp256k1::schnorr::Signature;
+use bitcoin::secp256k1::{Message, PublicKey, Secp256k1};
 use db::{DbKeyPrefix, EscrowKey, EscrowValue};
 use fedimint_core::config::{
     ConfigGenModuleParams, DkgResult, ServerModuleConfig, ServerModuleConsensusConfig,
@@ -28,14 +30,13 @@ use fedimint_escrow_common::config::{
     EscrowClientConfig, EscrowConfig, EscrowConfigConsensus, EscrowConfigLocal,
     EscrowConfigPrivate, EscrowGenParams,
 };
-use fedimint_escrow_common::endpoints::{ModuleInfo, GET_MODULE_INFO};
+use fedimint_escrow_common::endpoints::{EscrowInfo, GET_MODULE_INFO};
 use fedimint_escrow_common::{
     hash256, EscrowCommonInit, EscrowConsensusItem, EscrowInput, EscrowInputError,
     EscrowModuleTypes, EscrowOutput, EscrowOutputError, EscrowOutputOutcome, EscrowStates,
     CONSENSUS_VERSION,
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
-use secp256k1::{Message, PublicKey, Secp256k1, Signature};
 use states::EscrowError;
 
 /// Generates the module
@@ -204,25 +205,45 @@ impl ServerModule for Escrow {
         dbtx: &mut DatabaseTransaction<'c>,
         input: &'b EscrowInput,
     ) -> Result<InputMeta, EscrowInputError> {
-        let escrow_key = EscrowKey {
-            escrow_id: input.escrow_id.to_string(),
-        };
-        let mut escrow_value: EscrowValue = dbtx
-            .get_value(&escrow_key)
-            .await?
-            .ok_or_else(|| EscrowError::EscrowNotFound)?;
-
-        let claimer = escrow_value.seller_pubkey;
-
         match input {
             EscrowInput::ClamingWithoutDispute(escrow_input) => {
+                let escrow_value = self.get_escrow_value(dbtx, escrow_input.escrow_id).await?;
+                // check the signature of seller
+                let secp = Secp256k1::new();
+                let xonly_pubkey =
+                    XOnlyPublicKey::from_slice(&escrow_value.seller_pubkey.serialize())?;
+
+                if !secp
+                    .verify_schnorr(
+                        &escrow_input.signature,
+                        &escrow_input.message,
+                        &xonly_pubkey,
+                    )
+                    .is_ok()
+                {
+                    return Err(EscrowError::InvalidSeller);
+                }
+
                 // the secret code when hashed should be the same as the one in the db
                 if escrow_value.secret_code_hash != hash256(escrow_input.secret_code) {
                     return Err(EscrowError::InvalidSecretCode);
                 }
                 escrow_value.state = EscrowStates::ResolvedWithoutDispute;
+
+                // Update the escrow value in the database
+                dbtx.insert_entry(&escrow_key, &escrow_value).await?;
+                dbtx.commit().await?;
+
+                Ok(InputMeta {
+                    amount: TransactionItemAmount {
+                        amount: input.amount,
+                        fee: Amount::ZERO,
+                    },
+                    pub_key: escrow_value.seller_pubkey, // the one who is getting the ecash
+                })
             }
             EscrowInput::Disputing(escrow_input) => {
+                let escrow_value = self.get_escrow_value(dbtx, escrow_input.escrow_id).await?;
                 // Determine who is disputing
                 let disputer = if escrow_input.disputer == escrow_value.buyer_pubkey {
                     Disputer::Buyer
@@ -231,6 +252,28 @@ impl ServerModule for Escrow {
                 } else {
                     return Err(EscrowError::UnauthorizedToDispute);
                 };
+
+                // check the signature of disputer
+                let secp = Secp256k1::new();
+                let xonly_pubkey = match disputer {
+                    Disputer::Buyer => {
+                        XOnlyPublicKey::from_slice(&escrow_value.buyer_pubkey.serialize())?
+                    }
+                    Disputer::Seller => {
+                        XOnlyPublicKey::from_slice(&escrow_value.seller_pubkey.serialize())?
+                    }
+                };
+
+                if !secp
+                    .verify_schnorr(
+                        &escrow_input.signature,
+                        &escrow_input.message,
+                        &xonly_pubkey,
+                    )
+                    .is_ok()
+                {
+                    return Err(EscrowError::InvalidArbiter);
+                }
 
                 match escrow_value.state {
                     EscrowStates::Open => {
@@ -241,24 +284,37 @@ impl ServerModule for Escrow {
                     }
                     _ => return Err(EscrowError::InvalidStateForInitiatingDispute),
                 }
+
+                // Update the escrow value in the database
+                let escrow_key = self.get_escrow_key(dbtx, escrow_input.escrow_id).await?;
+                dbtx.insert_entry(&escrow_key, &escrow_value).await?;
+                dbtx.commit().await?;
+
+                Ok(InputMeta {
+                    amount: TransactionItemAmount {
+                        amount: Amount::ZERO,
+                        fee: Amount::ZERO,
+                    },
+                    pub_key: escrow_input.disputer,
+                })
             }
             EscrowInput::ArbiterDecision(escrow_input) => {
+                let escrow_value = self.get_escrow_value(dbtx, escrow_input.escrow_id).await?;
                 // the escrow state should be disputed for the arbiter to take decision
-                let escrow_value: ModuleInfo = escrow
-                    .client_ctx
-                    .api()
-                    .request(GET_MODULE_INFO, escrow_id)
-                    .await?;
                 if escrow_value.state != EscrowStates::Disputed {
                     return Err(EscrowError::EscrowNotDisputed);
                 }
+
                 // check the signature of arbiter
                 let secp = Secp256k1::new();
+                let xonly_pubkey =
+                    XOnlyPublicKey::from_slice(&escrow_value.arbiter_pubkey.serialize())?;
+
                 if !secp
-                    .verify(
-                        &escrow_input.message,
+                    .verify_schnorr(
                         &escrow_input.signature,
-                        &escrow_value.arbiter_pubkey,
+                        &escrow_input.message,
+                        &xonly_pubkey,
                     )
                     .is_ok()
                 {
@@ -282,31 +338,89 @@ impl ServerModule for Escrow {
                         escrow_value.state = EscrowStates::WaitingforSellerToClaim;
                     }
                 }
+
+                // Update the escrow value in the database
+                let escrow_key = self.get_escrow_key(dbtx, escrow_input.escrow_id).await?;
+                dbtx.insert_entry(&escrow_key, &escrow_value).await?;
+                dbtx.commit().await?;
+
+                Ok(InputMeta {
+                    amount: TransactionItemAmount {
+                        amount: input.amount,
+                        fee: Amount::ZERO,
+                    },
+                    pub_key: escrow_value.arbiter_pubkey, // the one who is getting the ecash
+                })
             }
-            EscrowInput::ClaimingAfterDispute(escrow_input) => match escrow_value.state {
-                EscrowStates::WaitingforBuyerToClaim => {
-                    escrow_value.state = EscrowStates::ResolvedWithDispute;
-                    // by default the claimer is the seller
-                    claimer = escrow_value.buyer_pubkey;
+            EscrowInput::ClaimingAfterDispute(escrow_input) => {
+                let escrow_value = self.get_escrow_value(dbtx, escrow_input.escrow_id).await?;
+                match escrow_value.state {
+                    EscrowStates::WaitingforBuyerToClaim => {
+                        // check the signature of buyer
+                        let secp = Secp256k1::new();
+                        let xonly_pubkey =
+                            XOnlyPublicKey::from_slice(&escrow_value.buyer_pubkey.serialize())?;
+
+                        if !secp
+                            .verify_schnorr(
+                                &escrow_input.signature,
+                                &escrow_input.message,
+                                &xonly_pubkey,
+                            )
+                            .is_ok()
+                        {
+                            return Err(EscrowError::InvalidArbiter);
+                        }
+                        escrow_value.state = EscrowStates::ResolvedWithDispute;
+
+                        // Update the escrow value in the database
+                        let escrow_key = self.get_escrow_key(dbtx, escrow_input.escrow_id).await?;
+                        dbtx.insert_entry(&escrow_key, &escrow_value).await?;
+                        dbtx.commit().await?;
+
+                        Ok(InputMeta {
+                            amount: TransactionItemAmount {
+                                amount: input.amount,
+                                fee: Amount::ZERO,
+                            },
+                            pub_key: escrow_value.seller_pubkey, // the one who is getting the ecash
+                        })
+                    }
+                    EscrowStates::WaitingforSellerToClaim => {
+                        // check the signature of buyer
+                        let secp = Secp256k1::new();
+                        let xonly_pubkey =
+                            XOnlyPublicKey::from_slice(&escrow_value.seller_pubkey.serialize())?;
+
+                        if !secp
+                            .verify_schnorr(
+                                &escrow_input.signature,
+                                &escrow_input.message,
+                                &xonly_pubkey,
+                            )
+                            .is_ok()
+                        {
+                            return Err(EscrowError::InvalidArbiter);
+                        }
+                        escrow_value.state = EscrowStates::ResolvedWithDispute;
+
+                        // Update the escrow value in the database
+                        let escrow_key = self.get_escrow_key(dbtx, escrow_input.escrow_id).await?;
+                        dbtx.insert_entry(&escrow_key, &escrow_value).await?;
+                        dbtx.commit().await?;
+
+                        Ok(InputMeta {
+                            amount: TransactionItemAmount {
+                                amount: input.amount,
+                                fee: Amount::ZERO,
+                            },
+                            pub_key: escrow_value.seller_pubkey, // the one who is getting the ecash
+                        })
+                    }
+                    _ => return Err(EscrowError::InvalidStateForClaimingEscrow),
                 }
-                EscrowStates::WaitingforSellerToClaim => {
-                    escrow_value.state = EscrowStates::ResolvedWithDispute;
-                }
-                _ => return Err(EscrowError::InvalidStateForClaimingEscrow),
-            },
+            }
         }
-
-        // Update the escrow value in the database
-        dbtx.insert_entry(&escrow_key, &escrow_value).await?;
-        dbtx.commit().await?;
-
-        Ok(InputMeta {
-            amount: TransactionItemAmount {
-                amount: input.amount,
-                fee: Amount::ZERO,
-            },
-            pub_key: claimer, // the one who is getting the ecash
-        })
     }
 
     async fn process_output<'a, 'b>(
@@ -326,7 +440,7 @@ impl ServerModule for Escrow {
             secret_code_hash: output.secret_code_hash,
             max_arbiter_fee: output.max_arbiter_fee,
             state: EscrowStates::Open,
-            created_at: chrono::Utc::now().timestamp(), // set the timestamp for escrow creation
+            created_at: SystemTime::now(), // set the timestamp for escrow creation
         };
 
         // guardian db entry
@@ -384,7 +498,7 @@ impl ServerModule for Escrow {
         vec![api_endpoint! {
             GET_MODULE_INFO,
             ApiVersion::new(0, 0),
-            async |module: &Escrow, context, escrow_id: String| -> ModuleInfo {
+            async |module: &Escrow, context, escrow_id: String| -> EscrowInfo {
                 module.handle_get_module_info(&mut context.dbtx().into_nc(), escrow_id).await
             }
         }]
@@ -401,12 +515,12 @@ impl Escrow {
         &self,
         dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
         escrow_id: String,
-    ) -> Result<ModuleInfo, ApiError> {
+    ) -> Result<EscrowInfo, ApiError> {
         let escrow_value: EscrowValue = dbtx
             .get_value(&EscrowKey { escrow_id })
             .await?
             .ok_or(EscrowError::EscrowNotFound)?;
-        Ok(ModuleInfo {
+        Ok(EscrowInfo {
             buyer_pubkey: escrow_value.buyer_pubkey,
             seller_pubkey: escrow_value.seller_pubkey,
             arbiter_pubkey: escrow_value.arbiter_pubkey,
@@ -416,5 +530,25 @@ impl Escrow {
             max_arbiter_fee: escrow_value.max_arbiter_fee,
             created_at: escrow_value.created_at,
         })
+    }
+
+    async fn get_escrow_value(
+        &self,
+        dbtx: &mut DatabaseTransaction<'a>,
+        escrow_id: String,
+    ) -> Result<EscrowValue, EscrowError> {
+        let escrow_key = self.get_escrow_key(dbtx, escrow_id).await?;
+        dbtx.get_value(&escrow_key)
+            .await?
+            .ok_or(EscrowError::EscrowNotFound)?;
+    }
+
+    async fn get_escrow_key(
+        &self,
+        dbtx: &mut DatabaseTransaction<'a>,
+        escrow_id: String,
+    ) -> Result<EscrowKey, EscrowError> {
+        let escrow_key = EscrowKey { escrow_id };
+        Ok(escrow_key)
     }
 }

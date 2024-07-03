@@ -2,13 +2,14 @@ pub mod endpoints;
 
 use std::fmt;
 
+use bitcoin::secp256k1::schnorr::Signature;
+use bitcoin::secp256k1::{Message, PublicKey};
 use config::EscrowClientConfig;
 use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind, OperationId};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
 use fedimint_core::{plugin_types_trait_impl_common, Amount};
 use hex;
-use secp256k1::{Message, PublicKey, Signature};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -83,14 +84,20 @@ pub enum EscrowInput {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct EscrowInputClamingWithoutDispute {
     pub amount: Amount,
+    pub escrow_id: String,
     pub secret_code: String,
+    pub message: Message,
+    pub signature: Signature,
 }
 
-/// The input for the escrow module when the arbiter needs
+/// The input for the escrow module when the buyer or seller is disputing the
+/// escrow
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct EscrowInputDisputing {
-    pub amount: Amount,
+    pub escrow_id: String,
     pub disputer: PublicKey,
+    pub message: Message,
+    pub signature: Signature,
 }
 
 /// The input for the escrow module when the seller or the buyer whosoever in
@@ -98,6 +105,9 @@ pub struct EscrowInputDisputing {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct EscrowInputClamingAfterDispute {
     pub amount: Amount,
+    pub escrow_id: String,
+    pub message: Message,
+    pub signature: Signature,
 }
 
 /// The input for the escrow module when the seller is claiming the escrow using
@@ -105,9 +115,10 @@ pub struct EscrowInputClamingAfterDispute {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct EscrowInputArbiterDecision {
     pub amount: Amount,
+    pub escrow_id: String,
     pub arbiter_decision: ArbiterDecision,
-    pub signature: Signature,
     pub message: Message,
+    pub signature: Signature,
 }
 
 /// The output for the escrow module
@@ -120,17 +131,6 @@ pub struct EscrowOutput {
     pub escrow_id: String,
     pub secret_code_hash: String,
     pub max_arbiter_fee: Amount,
-}
-
-/// The high level state for tracking operations of transactions
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub enum EscrowOperationState {
-    /// The transaction is being processed by the federation
-    Created,
-    /// The transaction is accepted by the federation
-    Accepted,
-    /// The transaction is rejected by the federation
-    Rejected,
 }
 
 /// Errors that might be returned by the server when the buyer awaits guardians

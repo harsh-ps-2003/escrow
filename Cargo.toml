@@ -34,7 +34,8 @@ aead = { git = "https://github.com/fedimint/fedimint", tag = "v0.3.0" }
 threshold_crypto = { git = "https://github.com/fedimint/threshold_crypto" }
 tbs = { git = "https://github.com/fedimint/fedimint", tag = "v0.3.0" }
 async-trait = "0.1.73"
-secp256k1 = "0.24.2"
+bitcoin = { version = "0.32.2", features = ["rand-std"] }
+secp256k1 = "0.29.0"
 strum = "0.26.2"
 strum_macros = "0.26.2"
 thiserror = "1.0.39"

@@ -1,7 +1,9 @@
+use std::time::SystemTime;
+
+use bitcoin::secp256k1::PublicKey;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::{impl_db_record, Amount};
 use fedimint_escrow_common::EscrowStates;
-use secp256k1::PublicKey;
 use serde::{Deserialize, Serialize};
 use strum_macros::EnumIter;
 
@@ -34,7 +36,7 @@ pub struct EscrowValue {
     pub secret_code_hash: String,
     pub max_arbiter_fee: Amount,
     pub state: EscrowStates,
-    pub created_at: u64,
+    pub created_at: SystemTime,
 }
 
 /// Implement database record creation and lookup

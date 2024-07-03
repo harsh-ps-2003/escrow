@@ -5,7 +5,7 @@ use anyhow::Context;
 use chrono::prelude::*;
 use clap::Parser;
 use fedimint_core::Amount;
-use fedimint_escrow_common::endpoints::ModuleInfo;
+use fedimint_escrow_common::endpoints::EscrowInfo;
 use secp256k1::PublicKey;
 use serde::Serialize;
 use serde_json::json;
@@ -91,7 +91,7 @@ pub(crate) async fn handle_cli_command(
         }
         Command::EscrowInfo { escrow_id } => {
             // get escrow info corresponding to the id from db using federation api
-            let escrow_value: ModuleInfo = escrow
+            let escrow_value: EscrowInfo = escrow
                 .client_ctx
                 .api()
                 .request(GET_MODULE_INFO, escrow_id)
@@ -109,7 +109,7 @@ pub(crate) async fn handle_cli_command(
             secret_code,
         } => {
             // get escrow info corresponding to the id from db using federation api
-            let escrow_value: ModuleInfo = self
+            let escrow_value: EscrowInfo = self
                 .client_ctx
                 .api()
                 .request(GET_MODULE_INFO, escrow_id)
@@ -144,7 +144,7 @@ pub(crate) async fn handle_cli_command(
             // the arbiter will take a fee (decided off band)
             // decision has 2 values, buyer or seller.
             escrow
-                .arbiter_decision(escrow_id, decision, signature, arbiter_fee_bps)
+                .arbiter_decision(escrow_id, decision, arbiter_fee_bps)
                 .await?;
             Ok(json!({
                 "escrow_id": escrow_id,
