@@ -6,8 +6,6 @@ use std::time::SystemTime;
 
 use anyhow::bail;
 use async_trait::async_trait;
-use bitcoin::secp256k1::schnorr::Signature;
-use bitcoin::secp256k1::{Message, PublicKey, Secp256k1};
 use db::{DbKeyPrefix, EscrowKey, EscrowValue};
 use fedimint_core::config::{
     ConfigGenModuleParams, DkgResult, ServerModuleConfig, ServerModuleConsensusConfig,
@@ -37,6 +35,8 @@ use fedimint_escrow_common::{
     CONSENSUS_VERSION,
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
+use secp256k1::schnorr::Signature;
+use secp256k1::{Message, PublicKey, Secp256k1};
 use states::EscrowError;
 
 /// Generates the module

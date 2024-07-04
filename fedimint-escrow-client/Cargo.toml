@@ -23,14 +23,13 @@ fedimint-core ={ workspace = true }
 futures = { workspace = true }
 erased-serde = { workspace = true }
 rand = { workspace = true }
-secp256k1 = {workspace = true}
 serde = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 threshold_crypto = { workspace = true }
-chrono = "0.4.38"
+secp256k1 = { workspace = true }
 
 [build-dependencies]
 fedimint-build = { git = "https://github.com/fedimint/fedimint" }

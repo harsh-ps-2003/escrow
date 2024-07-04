@@ -2,14 +2,14 @@ pub mod endpoints;
 
 use std::fmt;
 
-use bitcoin::secp256k1::schnorr::Signature;
-use bitcoin::secp256k1::{Message, PublicKey};
 use config::EscrowClientConfig;
-use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind, OperationId};
+use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
 use fedimint_core::{plugin_types_trait_impl_common, Amount};
 use hex;
+use secp256k1::schnorr::Signature;
+use secp256k1::{Message, PublicKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -55,20 +55,21 @@ pub enum EscrowStates {
 }
 
 /// The disputer in the escrow, can either be buyer or the seller
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Disputer {
     Buyer,
     Seller,
 }
 
 /// The arbiter decision on who won the dispute, either the buyer or the seller
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum ArbiterDecision {
     BuyerWins,
     SellerWins,
 }
 
 /// The input for the escrow module
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum EscrowInput {
     /// The input when seller is claiming the escrow without any dispute
     ClamingWithoutDispute(EscrowInputClamingWithoutDispute),
@@ -81,7 +82,7 @@ pub enum EscrowInput {
 }
 /// The input for the escrow module when the seller is claiming the escrow using
 /// the secret code
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct EscrowInputClamingWithoutDispute {
     pub amount: Amount,
     pub escrow_id: String,
@@ -92,7 +93,7 @@ pub struct EscrowInputClamingWithoutDispute {
 
 /// The input for the escrow module when the buyer or seller is disputing the
 /// escrow
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct EscrowInputDisputing {
     pub escrow_id: String,
     pub disputer: PublicKey,
@@ -102,7 +103,7 @@ pub struct EscrowInputDisputing {
 
 /// The input for the escrow module when the seller or the buyer whosoever in
 /// favour arbiter decided is claiming the escrow without using the secret code
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct EscrowInputClamingAfterDispute {
     pub amount: Amount,
     pub escrow_id: String,
@@ -112,7 +113,7 @@ pub struct EscrowInputClamingAfterDispute {
 
 /// The input for the escrow module when the seller is claiming the escrow using
 /// the secret code
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct EscrowInputArbiterDecision {
     pub amount: Amount,
     pub escrow_id: String,
@@ -122,7 +123,7 @@ pub struct EscrowInputArbiterDecision {
 }
 
 /// The output for the escrow module
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct EscrowOutput {
     pub amount: Amount,
     pub buyer_pubkey: PublicKey,
@@ -200,8 +201,8 @@ impl fmt::Display for EscrowInput {
             ),
             EscrowInput::Disputing(input) => write!(
                 f,
-                "EscrowInput::Disputing {{ amount: {}, disputer: {:?} }}",
-                input.amount, input.disputer
+                "EscrowInput::Disputing {{ disputer: {:?} }}",
+                input.disputer
             ),
             EscrowInput::ClamingAfterDispute(input) => write!(
                 f,
@@ -213,8 +214,8 @@ impl fmt::Display for EscrowInput {
                 "EscrowInput::ArbiterDecision {{ amount: {}, decision: {:?}, signature: {}, message: {} }}",
                 input.amount,
                 input.arbiter_decision,
-                hex::encode(&input.signature.serialize_compact()),
-                hex::encode(&input.message.serialize())
+                hex::encode(&input.signature.serialize()),
+                hex::encode(&input.message[..])
             ),
         }
     }

@@ -30,4 +30,4 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 threshold_crypto = { workspace = true }
 uuid = { version = "1.8.0", features = ["v4"] }
-bitcoin = { workspace = true }
+secp256k1 = { workspace = true }

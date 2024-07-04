@@ -66,7 +66,7 @@ impl EscrowConfigConsensus {
     pub fn limit_max_arbiter_fee_bps(&self) -> u16 {
         // the max_arbiter_fee_bps should be in range 10 (0.1%) to 1000 (10%)
         if self.max_arbiter_fee_bps < 10 || self.max_arbiter_fee_bps > 1000 {
-            Err(EscrowError::InvalidMaxArbiterFeeBps);
+            anyhow::anyhow!("max_arbiter_fee_bps is out of bounds");
         }
         self.max_arbiter_fee_bps
     }

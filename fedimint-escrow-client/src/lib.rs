@@ -21,7 +21,8 @@ use fedimint_escrow_common::{
 use fedimint_escrow_server::{EscrowError, EscrowStateMachine};
 use futures::StreamExt;
 use rand::{thread_rng, Rng};
-use secp256k1::PublicKey;
+use secp256k1::{Message, PublicKey, Secp256k1};
+use sha2::{Digest, Sha256};
 
 pub mod cli;
 
@@ -190,8 +191,13 @@ impl EscrowClientModule {
         if escrow_value.state != EscrowState::WaitingforSellerToClaim || EscrowState::Open {
             return Err(EscrowError::ArbiterNotDecided);
         }
-        // Create a message from the secret_code
-        let message = Message::from_hashed_data::<sha256::Hash>(secret_code.as_bytes());
+        let secp = Secp256k1::new();
+        // Hash the secret code string
+        let mut hasher = Sha256::new();
+        hasher.update(secret_code.as_bytes());
+        let hashed = hasher.finalize();
+        // Create the message from the hash
+        let message = Message::from_slice(&hashed).expect("32 bytes");
         // Sign the message using Schnorr signature
         let signature = secp.sign_schnorr(&message, &self.key);
         let operation_id = OperationId(thread_rng().gen());
@@ -254,8 +260,13 @@ impl EscrowClientModule {
             return Err(EscrowError::ArbiterNotDecided);
         }
 
-        // Create a message from the sample string
-        let message = Message::from_hashed_data::<sha256::Hash>("buyer_claim".as_bytes());
+        let secp = Secp256k1::new();
+        // Hash the decision string
+        let mut hasher = Sha256::new();
+        hasher.update("buyer_claim".as_bytes());
+        let hashed = hasher.finalize();
+        // Create the message from the hash
+        let message = Message::from_slice(&hashed).expect("32 bytes");
         // Sign the message using Schnorr signature
         let signature = secp.sign_schnorr(&message, &self.key);
 
@@ -318,6 +329,7 @@ impl EscrowClientModule {
             return Err(EscrowError::ArbiterNotDecided);
         }
 
+        let secp = Secp256k1::new();
         // Create a message from the sample string
         let message = Message::from_hashed_data::<sha256::Hash>("seller_claim".as_bytes());
         // Sign the message using Schnorr signature
@@ -371,6 +383,7 @@ impl EscrowClientModule {
             .request(GET_MODULE_INFO, escrow_id.clone())
             .await?;
 
+        let secp = Secp256k1::new();
         // Create a message from the a sample string
         let message = Message::from_hashed_data::<sha256::Hash>("dispute".as_bytes());
         // Sign the message using Schnorr signature using disputers keypair
@@ -440,6 +453,7 @@ impl EscrowClientModule {
         let arbiter_fee: Amount =
             Decimal::from(escrow_value.amount * fee_percentage) / Decimal::from(100);
 
+        let secp = Secp256k1::new();
         // Create a message from the secret_code
         let message = Message::from_hashed_data::<sha256::Hash>(decision.as_bytes());
         // Sign the message using Schnorr signature

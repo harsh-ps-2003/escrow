@@ -1,9 +1,9 @@
 use std::time::SystemTime;
 
-use bitcoin::secp256k1::PublicKey;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::{impl_db_record, Amount};
 use fedimint_escrow_common::EscrowStates;
+use secp256k1::PublicKey;
 use serde::{Deserialize, Serialize};
 use strum_macros::EnumIter;
 
