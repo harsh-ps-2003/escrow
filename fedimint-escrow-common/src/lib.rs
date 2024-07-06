@@ -9,7 +9,7 @@ use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersi
 use fedimint_core::{plugin_types_trait_impl_common, Amount};
 use hex;
 use secp256k1::schnorr::Signature;
-use secp256k1::{Message, PublicKey};
+use secp256k1::PublicKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -30,7 +30,7 @@ pub const CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion::ne
 pub struct EscrowConsensusItem;
 
 impl std::fmt::Display for EscrowConsensusItem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         unimplemented!()
     }
 }
@@ -87,7 +87,7 @@ pub struct EscrowInputClamingWithoutDispute {
     pub amount: Amount,
     pub escrow_id: String,
     pub secret_code: String,
-    pub message: Message,
+    pub hashed_message: [u8; 32],
     pub signature: Signature,
 }
 
@@ -97,7 +97,7 @@ pub struct EscrowInputClamingWithoutDispute {
 pub struct EscrowInputDisputing {
     pub escrow_id: String,
     pub disputer: PublicKey,
-    pub message: Message,
+    pub hashed_message: [u8; 32],
     pub signature: Signature,
 }
 
@@ -107,7 +107,7 @@ pub struct EscrowInputDisputing {
 pub struct EscrowInputClamingAfterDispute {
     pub amount: Amount,
     pub escrow_id: String,
-    pub message: Message,
+    pub hashed_message: [u8; 32],
     pub signature: Signature,
 }
 
@@ -118,7 +118,7 @@ pub struct EscrowInputArbiterDecision {
     pub amount: Amount,
     pub escrow_id: String,
     pub arbiter_decision: ArbiterDecision,
-    pub message: Message,
+    pub hashed_message: [u8; 32],
     pub signature: Signature,
 }
 
@@ -137,11 +137,54 @@ pub struct EscrowOutput {
 /// Errors that might be returned by the server when the buyer awaits guardians
 /// that the requested amount is burned
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
-pub enum EscrowInputError {}
+pub enum EscrowInputError {
+    #[error("Invalid secret code")]
+    InvalidSecretCode,
+    #[error("Escrow is not disputed, thus arbiter cannot decide the ecash to be given to buyer or seller")]
+    EscrowNotDisputed,
+    #[error("You are not the Arbiter!")]
+    ArbiterNotMatched,
+    #[error("Invalid arbiter state")]
+    InvalidArbiterState,
+    #[error("Invalid state for initiating dispute")]
+    InvalidStateForInitiatingDispute,
+    #[error("Invalid state for claiming escrow")]
+    InvalidStateForClaimingEscrow,
+    #[error("Unauthorized to dispute this escrow")]
+    UnauthorizedToDispute,
+    #[error("Invalid state for arbiter decision")]
+    InvalidStateForArbiterDecision,
+    #[error("Invalid arbiter signature")]
+    InvalidArbiter,
+    #[error("Invalid max arbiter fee in bps, it should be in range 10 to 1000")]
+    InvalidMaxArbiterFeeBps,
+    #[error("Invalid seller")]
+    InvalidSeller,
+    #[error("Invalid buyer")]
+    InvalidBuyer,
+}
 
 /// Errors that might be returned by the server
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
 pub enum EscrowOutputError {}
+
+/// The errors for the escrow module in client side
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
+pub enum EscrowError {
+    #[error("Escrow is disputed and cannot be claimed")]
+    EscrowDisputed,
+    #[error("Arbiter has not decided the ecash to be given to buyer or seller yet!")]
+    ArbiterNotDecided,
+    #[error("Invalid arbiter decision, either the winner can be the buyer or the seller")]
+    InvalidArbiterDecision,
+    #[error("Transaction was rejected")]
+    TransactionRejected,
+    #[error("Escrow not found")]
+    EscrowNotFound,
+    #[error("Database error: {0}")]
+    DatabaseError(String),
+}
+
 /// Contains the types defined above
 pub struct EscrowModuleTypes;
 
@@ -211,11 +254,10 @@ impl fmt::Display for EscrowInput {
             ),
             EscrowInput::ArbiterDecision(input) => write!(
                 f,
-                "EscrowInput::ArbiterDecision {{ amount: {}, decision: {:?}, signature: {}, message: {} }}",
+                "EscrowInput::ArbiterDecision {{ amount: {}, decision: {:?}, signature: {}}}",
                 input.amount,
                 input.arbiter_decision,
-                hex::encode(&input.signature.serialize()),
-                hex::encode(&input.message[..])
+                hex::encode(input.signature.as_ref()),
             ),
         }
     }

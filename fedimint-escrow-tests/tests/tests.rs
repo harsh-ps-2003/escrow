@@ -7,7 +7,6 @@ use fedimint_core::core::{IntoDynInstance, ModuleKind, OperationId};
 use fedimint_core::db::mem_impl::MemDatabase;
 use fedimint_core::module::ModuleConsensusVersion;
 use fedimint_core::{sats, Amount, OutPoint};
-use fedimint_escrow_client::states::EscrowStateMachine;
 use fedimint_escrow_client::{EscrowClientInit, EscrowClientModule};
 use fedimint_escrow_common::config::{EscrowClientConfig, EscrowGenParams};
 use fedimint_escrow_common::{EscrowInput, EscrowOutput, KIND};

@@ -1532,8 +1532,9 @@ dependencies = [
  "fedimint-escrow-server",
  "futures",
  "rand",
- "secp256k1 0.29.0",
+ "secp256k1 0.24.3",
  "serde",
+ "sha2",
  "strum 0.26.2",
  "strum_macros 0.26.2",
  "thiserror",
@@ -1553,7 +1554,7 @@ dependencies = [
  "futures",
  "hex",
  "rand",
- "secp256k1 0.29.0",
+ "secp256k1 0.24.3",
  "serde",
  "sha2",
  "strum 0.26.2",
@@ -1578,7 +1579,7 @@ dependencies = [
  "fedimint-server",
  "futures",
  "rand",
- "secp256k1 0.29.0",
+ "secp256k1 0.24.3",
  "serde",
  "sha2",
  "strum 0.26.2",
@@ -1602,7 +1603,7 @@ dependencies = [
  "fedimint-server",
  "fedimint-testing",
  "rand",
- "secp256k1 0.29.0",
+ "secp256k1 0.24.3",
  "threshold_crypto",
  "tokio",
  "tracing",
@@ -4342,17 +4343,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "secp256k1"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e0cc0f1cf93f4969faf3ea1c7d8a9faed25918d96affa959720823dfe86d4f3"
-dependencies = [
- "rand",
- "secp256k1-sys 0.10.0",
- "serde",
-]
-
-[[package]]
 name = "secp256k1-sys"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4366,15 +4356,6 @@ name = "secp256k1-sys"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "70a129b9e9efbfb223753b9163c4ab3b13cff7fd9c7f010fbac25ab4099fa07e"
-dependencies = [
- "cc",
-]
-
-[[package]]
-name = "secp256k1-sys"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1433bd67156263443f14d603720b082dd3121779323fce20cba2aa07b874bc1b"
 dependencies = [
  "cc",
 ]

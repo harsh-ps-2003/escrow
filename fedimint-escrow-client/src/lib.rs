@@ -13,12 +13,11 @@ use fedimint_core::module::{ApiVersion, ModuleCommon, MultiApiVersion, Transacti
 use fedimint_core::{apply, async_trait_maybe_send, Amount, Amount, OutPoint, TransactionId};
 use fedimint_escrow_common::config::{EscrowClientConfig, EscrowConfigConsensus};
 use fedimint_escrow_common::{
-    hash256, ArbiterDecision, EscrowInput, EscrowInputArbiterDecision, EscrowInputArbiterDecision,
-    EscrowInputClamingAfterDispute, EscrowInputClamingWithoutDispute, EscrowInputDisputing,
-    EscrowInputDisputing, EscrowInputForClaming, EscrowInputSeller, EscrowModuleTypes,
-    EscrowOutput, KIND,
+    hash256, ArbiterDecision, EscrowError, EscrowInput, EscrowInputArbiterDecision,
+    EscrowInputArbiterDecision, EscrowInputClamingAfterDispute, EscrowInputClamingWithoutDispute,
+    EscrowInputDisputing, EscrowInputDisputing, EscrowInputForClaming, EscrowInputSeller,
+    EscrowModuleTypes, EscrowOutput, KIND,
 };
-use fedimint_escrow_server::{EscrowError, EscrowStateMachine};
 use futures::StreamExt;
 use rand::{thread_rng, Rng};
 use secp256k1::{Message, PublicKey, Secp256k1};
@@ -32,7 +31,6 @@ pub struct EscrowClientModule {
     cfg: EscrowClientConfig,
     consensus_cfg: EscrowConfigConsensus,
     key: KeyPair,
-    notifier: ModuleNotifier<EscrowStateMachine>,
     client_ctx: ClientContext<Self>,
     db: Database,
 }
@@ -62,7 +60,7 @@ impl ClientModule for EscrowClientModule {
     type Common = EscrowModuleTypes;
     type Backup = NoModuleBackup;
     type ModuleStateMachineContext = EscrowClientContext;
-    type States = EscrowStateMachine;
+    type States = None;
 
     fn context(&self) -> Self::ModuleStateMachineContext {
         EscrowClientContext {
@@ -195,9 +193,9 @@ impl EscrowClientModule {
         // Hash the secret code string
         let mut hasher = Sha256::new();
         hasher.update(secret_code.as_bytes());
-        let hashed = hasher.finalize();
+        let hashed_message = hasher.finalize();
         // Create the message from the hash
-        let message = Message::from_slice(&hashed).expect("32 bytes");
+        let message = Message::from_slice(&hashed_message).expect("32 bytes");
         // Sign the message using Schnorr signature
         let signature = secp.sign_schnorr(&message, &self.key);
         let operation_id = OperationId(thread_rng().gen());
@@ -206,7 +204,7 @@ impl EscrowClientModule {
         let input = EscrowInputForClaming {
             amount,
             secret_code: secret_code,
-            message: message,
+            hashed_message: hashed_message,
             signature: signature,
         };
 
@@ -264,9 +262,9 @@ impl EscrowClientModule {
         // Hash the decision string
         let mut hasher = Sha256::new();
         hasher.update("buyer_claim".as_bytes());
-        let hashed = hasher.finalize();
+        let hashed_message = hasher.finalize();
         // Create the message from the hash
-        let message = Message::from_slice(&hashed).expect("32 bytes");
+        let message = Message::from_slice(&hashed_message).expect("32 bytes");
         // Sign the message using Schnorr signature
         let signature = secp.sign_schnorr(&message, &self.key);
 
@@ -275,7 +273,7 @@ impl EscrowClientModule {
         let input = EscrowInputClamingAfterDispute {
             amount,
             escrow_id,
-            message: message,
+            hashed_message: hashed_message,
             signature: signature,
         };
 
@@ -330,8 +328,12 @@ impl EscrowClientModule {
         }
 
         let secp = Secp256k1::new();
-        // Create a message from the sample string
-        let message = Message::from_hashed_data::<sha256::Hash>("seller_claim".as_bytes());
+        // Hash the decision string
+        let mut hasher = Sha256::new();
+        hasher.update("seller_claim".as_bytes());
+        let hashed_message = hasher.finalize();
+        // Create the message from the hash
+        let message = Message::from_slice(&hashed_message).expect("32 bytes");
         // Sign the message using Schnorr signature
         let signature = secp.sign_schnorr(&message, &self.key);
 
@@ -339,7 +341,7 @@ impl EscrowClientModule {
         let input = EscrowInputClamingAfterDispute {
             amount,
             escrow_id,
-            message: message,
+            hashed_message: hashed_message,
             signature: signature,
         };
 
@@ -384,15 +386,19 @@ impl EscrowClientModule {
             .await?;
 
         let secp = Secp256k1::new();
-        // Create a message from the a sample string
-        let message = Message::from_hashed_data::<sha256::Hash>("dispute".as_bytes());
+        // Hash the decision string
+        let mut hasher = Sha256::new();
+        hasher.update("dispute".as_bytes());
+        let hashed_message = hasher.finalize();
+        // Create the message from the hash
+        let message = Message::from_slice(&hashed_message).expect("32 bytes");
         // Sign the message using Schnorr signature using disputers keypair
         let signature = secp.sign_schnorr(&message, &self.key);
 
         let input = EscrowInputDisputing {
             escrow_id: escrow_id,
             disputer: self.key.public_key(), // the public key of the person who is disputing
-            message: message,
+            hashed_message: hashed_message,
             signature: signature,
         };
 
@@ -454,8 +460,12 @@ impl EscrowClientModule {
             Decimal::from(escrow_value.amount * fee_percentage) / Decimal::from(100);
 
         let secp = Secp256k1::new();
-        // Create a message from the secret_code
-        let message = Message::from_hashed_data::<sha256::Hash>(decision.as_bytes());
+        // Hash the decision string
+        let mut hasher = Sha256::new();
+        hasher.update(decision.as_bytes());
+        let hashed_message = hasher.finalize();
+        // Create the message from the hash
+        let message = Message::from_slice(&hashed_message).expect("32 bytes");
         // Sign the message using Schnorr signature
         let signature = secp.sign_schnorr(&message, &self.key);
 
@@ -464,7 +474,7 @@ impl EscrowClientModule {
             amount: arbiter_fee,
             escrow_id: escrow_id,
             arbiter_decision,
-            message: message,
+            hashed_message: hashed_message,
             signature: signature,
         };
 
@@ -589,7 +599,6 @@ impl ClientModuleInit for EscrowClientInit {
                 .module_root_secret()
                 .clone()
                 .to_secp_key(&Secp256k1::new()),
-            notifier: args.notifier().clone(),
             client_ctx: args.context(),
             db: args.db().clone(),
         })

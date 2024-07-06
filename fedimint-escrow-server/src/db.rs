@@ -27,7 +27,7 @@ pub struct EscrowKey {
 }
 
 /// The structure for the database record
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct EscrowValue {
     pub buyer_pubkey: PublicKey,
     pub seller_pubkey: PublicKey,

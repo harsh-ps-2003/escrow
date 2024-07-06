@@ -35,7 +35,7 @@ threshold_crypto = { git = "https://github.com/fedimint/threshold_crypto" }
 tbs = { git = "https://github.com/fedimint/fedimint", tag = "v0.3.0" }
 async-trait = "0.1.73"
 bitcoin = { version = "0.32.2", features = ["rand-std"] }
-secp256k1 = { version = "0.29.0", features = ["rand", "serde", "rand-std"] }
+secp256k1 = { version = "0.24.3", features = ["rand", "serde", "rand-std"] }
 strum = "0.26.2"
 strum_macros = "0.26.2"
 thiserror = "1.0.39"
@@ -45,6 +45,7 @@ rand = "0.8.5"
 serde = {version = "1.0.149", features = [ "derive" ] }
 erased-serde = "0.4"
 tracing = "0.1.37"
+sha2 = "0.10.8"
 
 # Comment above lines and uncomment these to work with local fedimint dependencies
 # fedimintd = { path = "../fedimint/fedimintd" }

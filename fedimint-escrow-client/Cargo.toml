@@ -30,6 +30,7 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 threshold_crypto = { workspace = true }
 secp256k1 = { workspace = true }
+sha2 = { workspace = true }
 
 [build-dependencies]
 fedimint-build = { git = "https://github.com/fedimint/fedimint" }
