@@ -34,6 +34,7 @@ use fedimint_escrow_common::{
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
 use secp256k1::{Message, Secp256k1, XOnlyPublicKey};
+use strum::IntoEnumIterator;
 
 /// Generates the module
 #[derive(Debug, Clone)]
@@ -51,16 +52,22 @@ impl ModuleInit for EscrowInit {
         dbtx: &mut DatabaseTransaction<'_>,
         prefix_names: Vec<String>,
     ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
-        // TODO: Boilerplate-code
         let mut items: BTreeMap<String, Box<dyn erased_serde::Serialize + Send>> = BTreeMap::new();
         let filtered_prefixes = DbKeyPrefix::iter().filter(|f| {
             prefix_names.is_empty() || prefix_names.contains(&f.to_string().to_lowercase())
         });
 
-        for table in filtered_prefixes {
-            match table {
+        for prefix in filtered_prefixes {
+            match prefix {
                 DbKeyPrefix::Escrow => {
-                    push_db_pair_items!(dbtx, Escrow, EscrowKey, Amount, items, "Escrow");
+                    let escrow_items: BTreeMap<EscrowKey, EscrowValue> =
+                        push_db_pair_items!(dbtx, DbKeyPrefix::Escrow, EscrowKey, EscrowValue);
+                    for (key, value) in escrow_items {
+                        items.insert(
+                            format!("Escrow.{}", key.escrow_id),
+                            Box::new(value) as Box<dyn erased_serde::Serialize + Send>,
+                        );
+                    }
                 }
             }
         }
@@ -172,7 +179,7 @@ impl ServerModule for Escrow {
         &self,
         _dbtx: &mut DatabaseTransaction<'_>,
     ) -> Vec<EscrowConsensusItem> {
-        Vec::new()
+        unimplemented!()
     }
 
     async fn process_consensus_item<'a, 'b>(
@@ -214,11 +221,8 @@ impl ServerModule for Escrow {
                 // Update the escrow value in the database
                 let escrow_key = self
                     .get_escrow_key(dbtx, escrow_input.escrow_id.clone())
-                    .await?;
-                dbtx.insert_entry(&escrow_key, &escrow_value)
-                    .await
-                    .map_err(|e| EscrowError::DatabaseError(e.to_string()))?;
-                dbtx.commit_tx().await?;
+                    .await;
+                dbtx.insert_entry(&escrow_key, &escrow_value).await;
 
                 Ok(InputMeta {
                     amount: TransactionItemAmount {
@@ -271,11 +275,8 @@ impl ServerModule for Escrow {
                 // Update the escrow value in the database
                 let escrow_key = self
                     .get_escrow_key(dbtx, escrow_input.escrow_id.clone())
-                    .await?;
-                dbtx.insert_entry(&escrow_key, &escrow_value)
-                    .await
-                    .map_err(|e| EscrowError::DatabaseError(e.to_string()))?;
-                dbtx.commit_tx().await?;
+                    .await;
+                dbtx.insert_entry(&escrow_key, &escrow_value).await;
 
                 Ok(InputMeta {
                     amount: TransactionItemAmount {
@@ -288,7 +289,9 @@ impl ServerModule for Escrow {
             EscrowInput::ArbiterDecision(escrow_input) => {
                 let escrow_value = self.get_escrow_value(dbtx, escrow_input.escrow_id).await?;
                 // the escrow state should be disputed for the arbiter to take decision
-                if escrow_value.state != EscrowStates::Disputed {
+                if escrow_value.state != EscrowStates::DisputedByBuyer
+                    && escrow_value.state != EscrowStates::DisputedBySeller
+                {
                     return Err(EscrowInputError::EscrowNotDisputed);
                 }
 
@@ -307,14 +310,14 @@ impl ServerModule for Escrow {
 
                 // Validate arbiter's fee
                 if escrow_input.amount > escrow_value.max_arbiter_fee {
-                    return Err(anyhow::anyhow!("Arbiter fee exceeds the maximum allowed"));
+                    return Err(EscrowInputError::ArbiterFeeExceedsMaximum);
                 } else {
                     // the contract amount is the amount of ecash in the contract - arbiter fee
                     escrow_value.amount = escrow_value.amount - escrow_input.amount;
                 }
 
                 // Update the escrow state based on the arbiter's decision
-                match escrow_input.arbiter_decision.as_ref() {
+                match escrow_input.arbiter_decision {
                     ArbiterDecision::BuyerWins => {
                         escrow_value.state = EscrowStates::WaitingforBuyerToClaim;
                     }
@@ -326,11 +329,8 @@ impl ServerModule for Escrow {
                 // Update the escrow value in the database
                 let escrow_key = self
                     .get_escrow_key(dbtx, escrow_input.escrow_id.clone())
-                    .await?;
-                dbtx.insert_entry(&escrow_key, &escrow_value)
-                    .await
-                    .map_err(|e| EscrowError::DatabaseError(e.to_string()))?;
-                dbtx.commit_tx().await?;
+                    .await;
+                dbtx.insert_entry(&escrow_key, &escrow_value).await;
 
                 Ok(InputMeta {
                     amount: TransactionItemAmount {
@@ -362,11 +362,8 @@ impl ServerModule for Escrow {
                         // Update the escrow value in the database
                         let escrow_key = self
                             .get_escrow_key(dbtx, escrow_input.escrow_id.clone())
-                            .await?;
-                        dbtx.insert_entry(&escrow_key, &escrow_value)
-                            .await
-                            .map_err(|e| EscrowError::DatabaseError(e.to_string()))?;
-                        dbtx.commit_tx().await?;
+                            .await;
+                        dbtx.insert_entry(&escrow_key, &escrow_value).await;
 
                         Ok(InputMeta {
                             amount: TransactionItemAmount {
@@ -395,11 +392,8 @@ impl ServerModule for Escrow {
                         // Update the escrow value in the database
                         let escrow_key = self
                             .get_escrow_key(dbtx, escrow_input.escrow_id.clone())
-                            .await?;
-                        dbtx.insert_entry(&escrow_key, &escrow_value)
-                            .await
-                            .map_err(|e| EscrowError::DatabaseError(e.to_string()))?;
-                        dbtx.commit_tx().await?;
+                            .await;
+                        dbtx.insert_entry(&escrow_key, &escrow_value).await;
 
                         Ok(InputMeta {
                             amount: TransactionItemAmount {
@@ -442,9 +436,7 @@ impl ServerModule for Escrow {
             },
             &escrow_value,
         )
-        .await
-        .map_err(|e| EscrowError::DatabaseError(e.to_string()))?;
-        dbtx.commit_tx().await?;
+        .await;
 
         Ok(TransactionItemAmount {
             amount: output.amount,
@@ -513,7 +505,6 @@ impl Escrow {
         let escrow_value: EscrowValue = dbtx
             .get_value(&EscrowKey { escrow_id })
             .await
-            .map_err(|e| ApiError::server_error(e.to_string()))?
             .ok_or_else(|| ApiError::not_found("Escrow not found".to_string()))?;
         Ok(EscrowInfo {
             buyer_pubkey: escrow_value.buyer_pubkey,
@@ -531,19 +522,18 @@ impl Escrow {
         &self,
         dbtx: &mut DatabaseTransaction<'a>,
         escrow_id: String,
-    ) -> Result<EscrowValue, EscrowError> {
-        let escrow_key = self.get_escrow_key(dbtx, escrow_id).await?;
+    ) -> Result<EscrowValue, EscrowInputError> {
+        let escrow_key = self.get_escrow_key(dbtx, escrow_id).await;
         dbtx.get_value(&escrow_key)
-            .await?
-            .ok_or(EscrowError::EscrowNotFound)?;
+            .await
+            .ok_or_else(|| EscrowInputError::EscrowNotFound)
     }
 
     async fn get_escrow_key<'a>(
         &self,
         dbtx: &mut DatabaseTransaction<'a>,
         escrow_id: String,
-    ) -> Result<EscrowKey> {
-        let escrow_key = EscrowKey { escrow_id };
-        Ok(escrow_key)
+    ) -> EscrowKey {
+        EscrowKey { escrow_id }
     }
 }

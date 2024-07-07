@@ -14,7 +14,7 @@ use fedimint_core::{apply, async_trait_maybe_send, Amount, Amount, OutPoint, Tra
 use fedimint_escrow_common::config::{EscrowClientConfig, EscrowConfigConsensus};
 use fedimint_escrow_common::{
     hash256, ArbiterDecision, EscrowError, EscrowInput, EscrowInputArbiterDecision,
-    EscrowInputArbiterDecision, EscrowInputClamingAfterDispute, EscrowInputClamingWithoutDispute,
+    EscrowInputArbiterDecision, EscrowInputClaimingAfterDispute, EscrowInputClamingWithoutDispute,
     EscrowInputDisputing, EscrowInputDisputing, EscrowInputForClaming, EscrowInputSeller,
     EscrowModuleTypes, EscrowOutput, KIND,
 };
@@ -270,7 +270,7 @@ impl EscrowClientModule {
 
         // Transfer ecash back to buyer after deduction of arbiter fee by underfunding
         // the transaction
-        let input = EscrowInputClamingAfterDispute {
+        let input = EscrowInputClaimingAfterDispute {
             amount,
             escrow_id,
             hashed_message: hashed_message,
@@ -338,7 +338,7 @@ impl EscrowClientModule {
         let signature = secp.sign_schnorr(&message, &self.key);
 
         // Transfer ecash back to buyer by underfunding the transaction
-        let input = EscrowInputClamingAfterDispute {
+        let input = EscrowInputClaimingAfterDispute {
             amount,
             escrow_id,
             hashed_message: hashed_message,

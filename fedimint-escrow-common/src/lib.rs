@@ -76,7 +76,7 @@ pub enum EscrowInput {
     /// The input when buyer or seller is disputing the escrow
     Disputing(EscrowInputDisputing),
     /// The input when buyer or seller is claiming the escrow after the dispute
-    ClamingAfterDispute(EscrowInputClamingAfterDispute),
+    ClaimingAfterDispute(EscrowInputClaimingAfterDispute),
     /// The input when arbiter is deciding who won the dispute
     ArbiterDecision(EscrowInputArbiterDecision),
 }
@@ -104,7 +104,7 @@ pub struct EscrowInputDisputing {
 /// The input for the escrow module when the seller or the buyer whosoever in
 /// favour arbiter decided is claiming the escrow without using the secret code
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
-pub struct EscrowInputClamingAfterDispute {
+pub struct EscrowInputClaimingAfterDispute {
     pub amount: Amount,
     pub escrow_id: String,
     pub hashed_message: [u8; 32],
@@ -162,6 +162,12 @@ pub enum EscrowInputError {
     InvalidSeller,
     #[error("Invalid buyer")]
     InvalidBuyer,
+    #[error("Escrow not found")]
+    EscrowNotFound,
+    #[error("Invalid public key")]
+    InvalidPublicKey(String),
+    #[error("Arbiter fee exceeds the maximum allowed")]
+    ArbiterFeeExceedsMaximum,
 }
 
 /// Errors that might be returned by the server
@@ -181,8 +187,12 @@ pub enum EscrowError {
     TransactionRejected,
     #[error("Escrow not found")]
     EscrowNotFound,
-    #[error("Database error: {0}")]
-    DatabaseError(String),
+}
+
+impl From<secp256k1::Error> for EscrowInputError {
+    fn from(error: secp256k1::Error) -> Self {
+        EscrowInputError::InvalidPublicKey(error.to_string())
+    }
 }
 
 /// Contains the types defined above
@@ -247,9 +257,9 @@ impl fmt::Display for EscrowInput {
                 "EscrowInput::Disputing {{ disputer: {:?} }}",
                 input.disputer
             ),
-            EscrowInput::ClamingAfterDispute(input) => write!(
+            EscrowInput::ClaimingAfterDispute(input) => write!(
                 f,
-                "EscrowInput::ClamingAfterDispute {{ amount: {} }}",
+                "EscrowInput::ClaimingAfterDispute {{ amount: {} }}",
                 input.amount
             ),
             EscrowInput::ArbiterDecision(input) => write!(
