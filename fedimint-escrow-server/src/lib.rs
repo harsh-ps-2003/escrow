@@ -5,7 +5,8 @@ use std::time::SystemTime;
 
 use anyhow::bail;
 use async_trait::async_trait;
-use db::{DbKeyPrefix, EscrowKey, EscrowValue};
+pub use db::EscrowValue;
+use db::{DbKeyPrefix, EscrowKey};
 use fedimint_core::config::{
     ConfigGenModuleParams, DkgResult, ServerModuleConfig, ServerModuleConsensusConfig,
     TypedServerModuleConfig, TypedServerModuleConsensusConfig,
@@ -29,8 +30,8 @@ use fedimint_escrow_common::config::{
 use fedimint_escrow_common::endpoints::{EscrowInfo, GET_MODULE_INFO};
 use fedimint_escrow_common::{
     hash256, ArbiterDecision, Disputer, EscrowCommonInit, EscrowConsensusItem, EscrowInput,
-    EscrowInputError, EscrowModuleTypes, EscrowOutput, EscrowOutputError, EscrowStates,
-    CONSENSUS_VERSION,
+    EscrowInputError, EscrowModuleTypes, EscrowOutput, EscrowOutputError, EscrowOutputOutcome,
+    EscrowStates, CONSENSUS_VERSION,
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
 use futures::StreamExt;
@@ -440,7 +441,7 @@ impl ServerModule for Escrow {
         &self,
         _dbtx: &mut DatabaseTransaction<'_>,
         _out_point: OutPoint,
-    ) -> Option<EscrowConsensusItem> {
+    ) -> Option<EscrowOutputOutcome> {
         unimplemented!()
     }
 

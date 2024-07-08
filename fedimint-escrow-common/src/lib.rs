@@ -213,10 +213,10 @@ plugin_types_trait_impl_common!(
     EscrowClientConfig,
     EscrowInput,
     EscrowOutput,
+    EscrowOutputOutcome,
     EscrowConsensusItem,
     EscrowInputError,
-    EscrowOutputError,
-    EscrowOutputOutcome
+    EscrowOutputError
 );
 
 /// The common initializer for the escrow module
