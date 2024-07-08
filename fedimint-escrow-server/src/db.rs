@@ -16,9 +16,9 @@ pub enum DbKeyPrefix {
 }
 
 impl DatabaseRecord for DbKeyPrefix {
-    const DB_PREFIX: u8;
-    type Key = Self;
-    type Value = ();
+    const DB_PREFIX: u8 = 0;
+    type Key = EscrowKey;
+    type Value = EscrowValue;
 }
 
 impl std::fmt::Display for DbKeyPrefix {
@@ -46,7 +46,7 @@ pub struct EscrowValue {
     pub created_at: SystemTime,
 }
 
-/// Implement database record creation and lookup
+// Implement database record creation and lookup
 impl_db_record!(
     key = EscrowKey,
     value = EscrowValue,
