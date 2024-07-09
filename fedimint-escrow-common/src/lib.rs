@@ -196,7 +196,22 @@ impl From<secp256k1::Error> for EscrowInputError {
 }
 
 /// Contains the types defined above
+#[derive(Debug, Clone)]
 pub struct EscrowModuleTypes;
+
+impl CommonModuleInit for EscrowModuleTypes {
+    const CONSENSUS_VERSION: ModuleConsensusVersion = CONSENSUS_VERSION;
+    const KIND: ModuleKind = KIND;
+
+    type ClientConfig = EscrowClientConfig;
+
+    fn decoder() -> Decoder {
+        let mut builder = Decoder::builder();
+        builder.with_decodable_type::<EscrowInput>();
+        builder.with_decodable_type::<EscrowOutput>();
+        builder.build()
+    }
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub enum EscrowOutputOutcome {}
@@ -230,7 +245,10 @@ impl CommonModuleInit for EscrowCommonInit {
     type ClientConfig = EscrowClientConfig;
 
     fn decoder() -> Decoder {
-        EscrowModuleTypes::decoder_builder().build()
+        let mut builder = Decoder::builder();
+        builder.with_decodable_type::<EscrowInput>();
+        builder.with_decodable_type::<EscrowOutput>();
+        builder.build()
     }
 }
 

@@ -48,6 +48,7 @@ pub struct EscrowConfig {
 pub struct EscrowClientConfig {
     /// Accessible to clients
     pub deposit_fee: Amount,
+    pub max_arbiter_fee_bps: u16,
 }
 
 /// Locally unencrypted config unique to each member

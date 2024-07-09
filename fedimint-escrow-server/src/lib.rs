@@ -151,6 +151,7 @@ impl ServerModuleInit for EscrowInit {
         let config = EscrowConfigConsensus::from_erased(config)?;
         Ok(EscrowClientConfig {
             deposit_fee: config.deposit_fee,
+            max_arbiter_fee_bps: config.max_arbiter_fee_bps,
         })
     }
 

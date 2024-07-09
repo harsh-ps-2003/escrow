@@ -1,23 +1,28 @@
+pub mod states;
+
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context as _};
 use async_stream::stream;
+use fedimint_api_client::api::DynModuleApi;
 use fedimint_client::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client::module::recovery::NoModuleBackup;
-use fedimint_client::module::{ClientContext, ClientModule, StateGenerator};
+use fedimint_client::module::{ClientContext, ClientModule};
 use fedimint_client::oplog::UpdateStreamOrOutcome;
-use fedimint_client::sm::{Context, ModuleNotifier};
+use fedimint_client::sm::Context;
 use fedimint_client::transaction::{ClientInput, ClientOutput, TransactionBuilder};
 use fedimint_core::core::{Decoder, KeyPair, OperationId};
-use fedimint_core::db::Database;
-use fedimint_core::module::{ApiVersion, ModuleCommon, MultiApiVersion, TransactionItemAmount};
+use fedimint_core::db::{Database, DatabaseTransaction, DatabaseVersion};
+use fedimint_core::module::{
+    ApiVersion, ModuleCommon, ModuleInit, MultiApiVersion, TransactionItemAmount,
+};
 use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint, TransactionId};
 use fedimint_escrow_common::config::{EscrowClientConfig, EscrowConfigConsensus};
 use fedimint_escrow_common::endpoints::{EscrowInfo, GET_MODULE_INFO};
 use fedimint_escrow_common::{
-    hash256, ArbiterDecision, EscrowError, EscrowInput, EscrowInputArbiterDecision,
-    EscrowInputClaimingAfterDispute, EscrowInputClamingWithoutDispute, EscrowInputDisputing,
-    EscrowModuleTypes, EscrowOutput, EscrowStates, KIND,
+    hash256, ArbiterDecision, EscrowCommonInit, EscrowError, EscrowInput,
+    EscrowInputArbiterDecision, EscrowInputClaimingAfterDispute, EscrowInputClamingWithoutDispute,
+    EscrowInputDisputing, EscrowModuleTypes, EscrowOutput, EscrowStates, KIND,
 };
 use futures::StreamExt;
 use rand::{thread_rng, Rng};
@@ -26,6 +31,8 @@ use rust_decimal::Decimal;
 use secp256k1::{Message, PublicKey, Secp256k1};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+use crate::states::{EscrowClientContext, EscrowStateMachine};
 
 pub mod cli;
 
@@ -36,6 +43,7 @@ pub struct EscrowClientModule {
     consensus_cfg: EscrowConfigConsensus,
     key: KeyPair,
     client_ctx: ClientContext<Self>,
+    // module_api: DynModuleApi,
     db: Database,
 }
 
@@ -49,14 +57,6 @@ pub enum EscrowOperationState {
     /// The transaction is rejected by the federation
     Rejected,
 }
-/// Data needed by the state machine as context
-#[derive(Debug, Clone)]
-pub struct EscrowClientContext {
-    pub escrow_decoder: Decoder,
-}
-
-// escrow module doesn't need local context
-impl Context for EscrowClientContext {}
 
 #[apply(async_trait_maybe_send!)]
 impl ClientModule for EscrowClientModule {
@@ -68,7 +68,7 @@ impl ClientModule for EscrowClientModule {
 
     fn context(&self) -> Self::ModuleStateMachineContext {
         EscrowClientContext {
-            escrow_decoder: self.decoder(),
+            escrow_decoder: EscrowModuleTypes::decoder(),
         }
     }
 
@@ -77,10 +77,21 @@ impl ClientModule for EscrowClientModule {
         &self,
         input: &<Self::Common as ModuleCommon>::Input,
     ) -> Option<TransactionItemAmount> {
-        Some(TransactionItemAmount {
-            amount: input.amount,
-            fee: Amount::ZERO, // seller does not need to pay any fee to get the ecash
-        })
+        match input {
+            EscrowInput::ClamingWithoutDispute(input) => Some(TransactionItemAmount {
+                amount: input.amount,
+                fee: Amount::ZERO,
+            }),
+            EscrowInput::ClaimingAfterDispute(input) => Some(TransactionItemAmount {
+                amount: input.amount,
+                fee: Amount::ZERO,
+            }),
+            EscrowInput::ArbiterDecision(input) => Some(TransactionItemAmount {
+                amount: input.amount,
+                fee: Amount::ZERO,
+            }),
+            EscrowInput::Disputing(_) => None, // Disputing doesn't involve an amount
+        }
     }
 
     /// conveys to the transaction the monetary value of escrow output so as to
@@ -145,7 +156,7 @@ impl EscrowClientModule {
 
         let client_output = ClientOutput {
             output,
-            state_machines: StateGenerator::new(vec![]),
+            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
         };
 
         // buyer gets statemachine as an asset to track the ecash issued!
@@ -162,8 +173,8 @@ impl EscrowClientModule {
             .await?;
 
         // Subscribe to transaction updates
-        let updates = self
-            .subscribe_transactions_output(operation_id, txid, change)
+        let mut updates = self
+            .subscribe_transactions_output(operation_id, txid, change.clone())
             .await
             .unwrap()
             .into_stream();
@@ -219,18 +230,18 @@ impl EscrowClientModule {
         let operation_id = OperationId(thread_rng().gen());
         // Transfer ecash to seller by overfunding the transaction
         // Create input using the buyer account
-        let input = EscrowInputClamingWithoutDispute {
+        let input = EscrowInput::ClamingWithoutDispute(EscrowInputClamingWithoutDispute {
             amount,
             escrow_id,
             secret_code: secret_code,
             hashed_message: hashed_message,
             signature: signature,
-        };
+        });
 
         let client_input = ClientInput {
             input,
             keys: vec![],
-            state_machines: StateGenerator::new(vec![]),
+            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
         };
 
         // Build and send tx to the fed
@@ -245,7 +256,7 @@ impl EscrowClientModule {
             .await?;
 
         // Subscribe to transaction updates
-        let updates = self
+        let mut updates = self
             .subscribe_transactions_input(operation_id, txid)
             .await
             .unwrap()
@@ -298,17 +309,17 @@ impl EscrowClientModule {
 
         // Transfer ecash back to buyer after deduction of arbiter fee by underfunding
         // the transaction
-        let input = EscrowInputClaimingAfterDispute {
+        let input = EscrowInput::ClaimingAfterDispute(EscrowInputClaimingAfterDispute {
             amount,
             escrow_id,
             hashed_message: hashed_message,
             signature: signature,
-        };
+        });
 
         let client_input = ClientInput {
             input,
             keys: vec![],
-            state_machines: StateGenerator::new(vec![]),
+            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
         };
 
         // Build and send tx to the fed
@@ -323,7 +334,7 @@ impl EscrowClientModule {
             .await?;
 
         // Subscribe to transaction updates
-        let updates = self
+        let mut updates = self
             .subscribe_transactions_input(operation_id, txid)
             .await
             .unwrap()
@@ -349,7 +360,7 @@ impl EscrowClientModule {
 
         let escrow_value: EscrowInfo = self
             .client_ctx
-            .api()
+            .module_api()
             .request(GET_MODULE_INFO, escrow_id)
             .await?;
         // the arbiter has not decided yet if the escrow is disputed!
@@ -375,17 +386,17 @@ impl EscrowClientModule {
         let signature = secp.sign_schnorr(&message, &self.key);
 
         // Transfer ecash back to buyer by underfunding the transaction
-        let input = EscrowInputClaimingAfterDispute {
+        let input = EscrowInput::ClaimingAfterDispute(EscrowInputClaimingAfterDispute {
             amount,
             escrow_id,
             hashed_message: hashed_message,
             signature: signature,
-        };
+        });
 
         let client_input = ClientInput {
             input,
             keys: vec![],
-            state_machines: StateGenerator::new(vec![]),
+            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
         };
 
         // Build and send tx to the fed
@@ -400,7 +411,7 @@ impl EscrowClientModule {
             .await?;
 
         // Subscribe to transaction updates
-        let updates = self
+        let mut updates = self
             .subscribe_transactions_input(operation_id, txid)
             .await
             .unwrap()
@@ -439,17 +450,17 @@ impl EscrowClientModule {
         // Sign the message using Schnorr signature using disputers keypair
         let signature = secp.sign_schnorr(&message, &self.key);
 
-        let input = EscrowInputDisputing {
+        let input = EscrowInput::Disputing(EscrowInputDisputing {
             escrow_id: escrow_id,
-            disputer: self.key.public_key(), // the public key of the person who is disputing
+            disputer: self.key.public_key(),
             hashed_message: hashed_message,
             signature: signature,
-        };
+        });
 
         let client_input = ClientInput {
             input,
             keys: vec![],
-            state_machines: StateGenerator::new(vec![]),
+            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
         };
 
         // Build and send tx to the fed
@@ -464,7 +475,7 @@ impl EscrowClientModule {
             .await?;
 
         // Subscribe to transaction updates
-        let updates = self
+        let mut updates = self
             .subscribe_transactions_input(operation_id, txid)
             .await
             .unwrap()
@@ -524,18 +535,18 @@ impl EscrowClientModule {
         let signature = secp.sign_schnorr(&message, &self.key);
 
         // Transfer ecash back to buyer by underfunding the transaction
-        let input = EscrowInputArbiterDecision {
+        let input = EscrowInput::ArbiterDecision(EscrowInputArbiterDecision {
             amount: arbiter_fee,
             escrow_id: escrow_id,
             arbiter_decision,
             hashed_message: hashed_message,
             signature: signature,
-        };
+        });
 
         let client_input = ClientInput {
             input,
             keys: vec![],
-            state_machines: StateGenerator::new(vec![]),
+            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
         };
 
         // Build and send tx to the fed
@@ -550,7 +561,7 @@ impl EscrowClientModule {
             .await?;
 
         // Subscribe to transaction updates
-        let updates = self
+        let mut updates = self
             .subscribe_transactions_input(operation_id, txid)
             .await
             .unwrap()
@@ -611,7 +622,7 @@ impl EscrowClientModule {
                     match self.client_ctx
                         .await_primary_module_outputs(operation_id, change)
                         .await
-                        .context("Ensuring that the ecash is claimed!") {
+                        .context("Ensuring that the transaction is successful!") {
                         Ok(_) => yield EscrowOperationState::Accepted,
                         Err(_) => yield EscrowOperationState::Rejected,
                     }
@@ -642,6 +653,19 @@ impl EscrowClientModule {
 #[derive(Debug, Clone)]
 pub struct EscrowClientInit;
 
+impl ModuleInit for EscrowClientInit {
+    type Common = EscrowCommonInit;
+    const DATABASE_VERSION: DatabaseVersion = DatabaseVersion(0);
+
+    fn dump_database(
+        &self,
+        _dbtx: &mut DatabaseTransaction<'_>,
+        _prefix_names: Vec<String>,
+    ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
+
 /// Generates the client module
 #[apply(async_trait_maybe_send!)]
 impl ClientModuleInit for EscrowClientInit {
@@ -653,9 +677,13 @@ impl ClientModuleInit for EscrowClientInit {
     }
 
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
+        let cfg = args.cfg().clone();
         Ok(EscrowClientModule {
-            cfg: args.cfg().clone(),
-            consensus_cfg: args.cfg().consensus_cfg.clone(),
+            cfg: cfg,
+            consensus_cfg: EscrowConfigConsensus {
+                deposit_fee: cfg.deposit_fee,
+                max_arbiter_fee_bps: cfg.max_arbiter_fee_bps,
+            },
             key: args
                 .module_root_secret()
                 .clone()

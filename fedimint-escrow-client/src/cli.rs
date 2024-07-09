@@ -79,7 +79,7 @@ pub(crate) async fn handle_cli_command(
             // finalize_and_submit txns to lock ecash by underfunding
             let (operation_id, out_point) = escrow
                 .create_escrow(
-                    Amount::from_sats(cost.into()),
+                    cost,
                     seller_pubkey,
                     arbiter_pubkey,
                     escrow_id.clone(),
