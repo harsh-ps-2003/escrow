@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use async_stream::stream;
+use async_trait::async_trait;
 use fedimint_client::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client::module::recovery::NoModuleBackup;
 use fedimint_client::module::{ClientContext, ClientModule};
@@ -632,6 +633,7 @@ impl EscrowClientModule {
 #[derive(Debug, Clone)]
 pub struct EscrowClientInit;
 
+#[async_trait]
 impl ModuleInit for EscrowClientInit {
     type Common = EscrowCommonInit;
     const DATABASE_VERSION: DatabaseVersion = DatabaseVersion(0);
@@ -658,7 +660,7 @@ impl ClientModuleInit for EscrowClientInit {
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
         let cfg = args.cfg().clone();
         Ok(EscrowClientModule {
-            cfg: cfg,
+            cfg: cfg.clone(),
             consensus_cfg: EscrowConfigConsensus {
                 deposit_fee: cfg.deposit_fee,
                 max_arbiter_fee_bps: cfg.max_arbiter_fee_bps,
