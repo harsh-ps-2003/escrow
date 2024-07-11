@@ -1,6 +1,11 @@
-server: 127.0.0.1:4050
 procs:
-  user:
+  buyer:
+    shell: bash --init-file scripts/dev/mprocs/user-shell.sh
+    stop: SIGKILL
+  seller:
+    shell: bash --init-file scripts/dev/mprocs/user-shell.sh
+    stop: SIGKILL
+  arbiter:
     shell: bash --init-file scripts/dev/mprocs/user-shell.sh
     stop: SIGKILL
   fedimint0:
@@ -22,4 +27,4 @@ procs:
   bitcoind:
     shell: tail -n +0 -F $FM_LOGS_DIR/bitcoind.log
   devimint:
-    shell: tail -n +0 -F $FM_LOGS_DIR/devimint.log
+    shell: tail -n +0 -F $FM_LOGS_DIR/devimint-outer.log
