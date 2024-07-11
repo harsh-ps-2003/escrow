@@ -10,7 +10,7 @@ use super::EscrowStates;
 pub const GET_MODULE_INFO: &str = "get_module_info";
 
 /// EscrowInfo is the response to the GET_MODULE_INFO request
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct EscrowInfo {
     pub buyer_pubkey: PublicKey,
     pub seller_pubkey: PublicKey,

@@ -1,19 +1,16 @@
-use std::str::FromStr as _;
 use std::{ffi, iter};
 
-use anyhow::Context;
 use clap::Parser;
 use fedimint_core::Amount;
-use fedimint_escrow_common::endpoints::{EscrowInfo, GET_MODULE_INFO};
-use fedimint_escrow_common::{hash256, ArbiterDecision, EscrowStates};
-use fedimint_escrow_server::EscrowValue;
+use fedimint_escrow_common::endpoints::EscrowInfo;
+use fedimint_escrow_common::hash256;
 use random_string::generate;
 use secp256k1::PublicKey;
 use serde::Serialize;
 use serde_json::json;
-use sha2::{Digest, Sha256};
 
 use super::EscrowClientModule;
+use crate::api::EscrowFederationApi;
 
 // TODO: we need cli-commands as well as API endpoints for these commands!
 #[derive(Parser, Serialize)]
@@ -77,7 +74,7 @@ pub(crate) async fn handle_cli_command(
             let secret_code_hash = hash256(secret_code.clone());
 
             // finalize_and_submit txns to lock ecash by underfunding
-            let (operation_id, out_point) = escrow
+            let (_operation_id, _out_point) = escrow
                 .create_escrow(
                     cost,
                     seller_pubkey,
@@ -98,11 +95,8 @@ pub(crate) async fn handle_cli_command(
         }
         Command::EscrowInfo { escrow_id } => {
             // get escrow info corresponding to the id from db using federation api
-            let escrow_value: EscrowInfo = escrow
-                .client_ctx
-                .api()
-                .request(GET_MODULE_INFO, escrow_id)
-                .await?;
+            let escrow_value: EscrowInfo =
+                escrow.module_api.get_escrow_info(escrow_id.clone()).await?;
             Ok(json!({
                 "buyer_pubkey": escrow_value.buyer_pubkey,
                 "seller_pubkey": escrow_value.seller_pubkey,
@@ -116,15 +110,12 @@ pub(crate) async fn handle_cli_command(
             secret_code,
         } => {
             // get escrow info corresponding to the id from db using federation api
-            let escrow_value: EscrowInfo = escrow
-                .client_ctx
-                .api()
-                .request(GET_MODULE_INFO, escrow_id)
-                .await?;
+            let escrow_value: EscrowInfo =
+                escrow.module_api.get_escrow_info(escrow_id.clone()).await?;
 
             // arbiter fee is 0 in this case!
             escrow
-                .claim_escrow(escrow_id, escrow_value.amount, secret_code)
+                .claim_escrow(escrow_id.clone(), escrow_value.amount, secret_code)
                 .await?;
             Ok(json!({
                 "escrow_id": escrow_id,
@@ -133,7 +124,7 @@ pub(crate) async fn handle_cli_command(
         }
         Command::EscrowDispute { escrow_id } => {
             // the arbiter will take a fee (decided off band)
-            escrow.initiate_dispute(escrow_id).await?;
+            escrow.initiate_dispute(escrow_id.clone()).await?;
             Ok(json!({
                 "escrow_id": escrow_id,
                 "status": "disputed!"
@@ -151,7 +142,7 @@ pub(crate) async fn handle_cli_command(
             // the arbiter will take a fee (decided off band)
             // decision has 2 values, buyer or seller.
             escrow
-                .arbiter_decision(escrow_id, decision, arbiter_fee_bps)
+                .arbiter_decision(escrow_id.clone(), decision, arbiter_fee_bps)
                 .await?;
             Ok(json!({
                 "escrow_id": escrow_id,
@@ -160,13 +151,12 @@ pub(crate) async fn handle_cli_command(
         }
         Command::BuyerClaim { escrow_id } => {
             // get escrow info corresponding to the id from db using federation api
-            let escrow_value: EscrowInfo = escrow
-                .client_ctx
-                .api()
-                .request(GET_MODULE_INFO, escrow_id)
-                .await?;
+            let escrow_value: EscrowInfo =
+                escrow.module_api.get_escrow_info(escrow_id.clone()).await?;
             // the amount to be claimed by buyer is the contract amount - arbiter fee
-            escrow.buyer_claim(escrow_id, escrow_value.amount).await?;
+            escrow
+                .buyer_claim(escrow_id.clone(), escrow_value.amount)
+                .await?;
             Ok(json!({
                 "escrow_id": escrow_id,
                 "status": "resolved!"
@@ -174,13 +164,12 @@ pub(crate) async fn handle_cli_command(
         }
         Command::SellerClaim { escrow_id } => {
             // get escrow info corresponding to the id from db using federation api
-            let escrow_value: EscrowInfo = escrow
-                .client_ctx
-                .api()
-                .request(GET_MODULE_INFO, escrow_id)
-                .await?;
+            let escrow_value: EscrowInfo =
+                escrow.module_api.get_escrow_info(escrow_id.clone()).await?;
             // the amount to be claimed by seller is the contract amount - arbiter fee
-            escrow.seller_claim(escrow_id, escrow_value.amount).await?;
+            escrow
+                .seller_claim(escrow_id.clone(), escrow_value.amount)
+                .await?;
             Ok(json!({
                 "escrow_id": escrow_id,
                 "status": "resolved!"

@@ -1,28 +1,29 @@
+pub mod api;
+pub mod cli;
 pub mod states;
 
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context as _};
+use anyhow::Context as _;
 use async_stream::stream;
-use fedimint_api_client::api::DynModuleApi;
 use fedimint_client::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client::module::recovery::NoModuleBackup;
 use fedimint_client::module::{ClientContext, ClientModule};
 use fedimint_client::oplog::UpdateStreamOrOutcome;
-use fedimint_client::sm::Context;
 use fedimint_client::transaction::{ClientInput, ClientOutput, TransactionBuilder};
-use fedimint_core::core::{Decoder, KeyPair, OperationId};
+use fedimint_core::api::DynModuleApi;
+use fedimint_core::core::{KeyPair, OperationId};
 use fedimint_core::db::{Database, DatabaseTransaction, DatabaseVersion};
 use fedimint_core::module::{
     ApiVersion, ModuleCommon, ModuleInit, MultiApiVersion, TransactionItemAmount,
 };
 use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint, TransactionId};
 use fedimint_escrow_common::config::{EscrowClientConfig, EscrowConfigConsensus};
-use fedimint_escrow_common::endpoints::{EscrowInfo, GET_MODULE_INFO};
+use fedimint_escrow_common::endpoints::EscrowInfo;
 use fedimint_escrow_common::{
-    hash256, ArbiterDecision, EscrowCommonInit, EscrowError, EscrowInput,
-    EscrowInputArbiterDecision, EscrowInputClaimingAfterDispute, EscrowInputClamingWithoutDispute,
-    EscrowInputDisputing, EscrowModuleTypes, EscrowOutput, EscrowStates, KIND,
+    ArbiterDecision, EscrowCommonInit, EscrowError, EscrowInput, EscrowInputArbiterDecision,
+    EscrowInputClaimingAfterDispute, EscrowInputClamingWithoutDispute, EscrowInputDisputing,
+    EscrowModuleTypes, EscrowOutput, EscrowStates, KIND,
 };
 use futures::StreamExt;
 use rand::{thread_rng, Rng};
@@ -32,9 +33,8 @@ use secp256k1::{Message, PublicKey, Secp256k1};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::api::EscrowFederationApi;
 use crate::states::{EscrowClientContext, EscrowStateMachine};
-
-pub mod cli;
 
 /// The escrow client module
 #[derive(Debug)]
@@ -43,7 +43,7 @@ pub struct EscrowClientModule {
     consensus_cfg: EscrowConfigConsensus,
     key: KeyPair,
     client_ctx: ClientContext<Self>,
-    // module_api: DynModuleApi,
+    module_api: DynModuleApi,
     db: Database,
 }
 
@@ -202,11 +202,7 @@ impl EscrowClientModule {
     ) -> anyhow::Result<()> {
         // make an api call to server db and get the secret code hash and state of
         // escrow, and then verify it
-        let escrow_value: EscrowInfo = self
-            .client_ctx
-            .api()
-            .request(GET_MODULE_INFO, escrow_id)
-            .await?;
+        let escrow_value: EscrowInfo = self.module_api.get_escrow_info(escrow_id.clone()).await?;
         // the escrow should not be in dispute when seller wants to claim
         if escrow_value.state == EscrowStates::DisputedByBuyer
             || escrow_value.state == EscrowStates::DisputedBySeller
@@ -250,7 +246,7 @@ impl EscrowClientModule {
         let tx =
             TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (txid, change) = self
+        let (txid, _change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
@@ -280,11 +276,7 @@ impl EscrowClientModule {
     pub async fn buyer_claim(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
 
-        let escrow_value: EscrowInfo = self
-            .client_ctx
-            .api()
-            .request(GET_MODULE_INFO, escrow_id)
-            .await?;
+        let escrow_value: EscrowInfo = self.module_api.get_escrow_info(escrow_id.clone()).await?;
         // the arbiter has not decided yet if the escrow is disputed!
         if escrow_value.state == EscrowStates::DisputedByBuyer
             || escrow_value.state == EscrowStates::DisputedBySeller
@@ -328,7 +320,7 @@ impl EscrowClientModule {
         let tx =
             TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (txid, change) = self
+        let (txid, _change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
@@ -358,11 +350,7 @@ impl EscrowClientModule {
     pub async fn seller_claim(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
 
-        let escrow_value: EscrowInfo = self
-            .client_ctx
-            .module_api()
-            .request(GET_MODULE_INFO, escrow_id)
-            .await?;
+        let escrow_value: EscrowInfo = self.module_api.get_escrow_info(escrow_id.clone()).await?;
         // the arbiter has not decided yet if the escrow is disputed!
         if escrow_value.state == EscrowStates::DisputedByBuyer
             || escrow_value.state == EscrowStates::DisputedBySeller
@@ -405,7 +393,7 @@ impl EscrowClientModule {
         let tx =
             TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (txid, change) = self
+        let (txid, _change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
@@ -433,12 +421,6 @@ impl EscrowClientModule {
     /// Handles the initiation of dispute
     pub async fn initiate_dispute(&self, escrow_id: String) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
-
-        let escrow_value: EscrowInfo = self
-            .client_ctx
-            .api()
-            .request(GET_MODULE_INFO, escrow_id.clone())
-            .await?;
 
         let secp = Secp256k1::new();
         // Hash the decision string
@@ -469,7 +451,7 @@ impl EscrowClientModule {
         let tx =
             TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (txid, change) = self
+        let (txid, _change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
@@ -509,11 +491,7 @@ impl EscrowClientModule {
             _ => return Err(anyhow::anyhow!(EscrowError::InvalidArbiterDecision)),
         };
 
-        let escrow_value: EscrowInfo = self
-            .client_ctx
-            .api()
-            .request(GET_MODULE_INFO, escrow_id.clone())
-            .await?;
+        let escrow_value: EscrowInfo = self.module_api.get_escrow_info(escrow_id.clone()).await?;
 
         // getting percentage from basis points
         let fee_percentage = Decimal::from(arbiter_fee_bps) / Decimal::from(100);
@@ -555,7 +533,7 @@ impl EscrowClientModule {
         let tx =
             TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (txid, change) = self
+        let (txid, _change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
@@ -612,6 +590,7 @@ impl EscrowClientModule {
         change: Vec<OutPoint>,
     ) -> anyhow::Result<UpdateStreamOrOutcome<EscrowOperationState>> {
         let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
+        let client_ctx = self.client_ctx.clone();
 
         Ok(UpdateStreamOrOutcome::UpdateStream(Box::pin(stream! {
             yield EscrowOperationState::Created;
@@ -619,7 +598,7 @@ impl EscrowClientModule {
             match tx_subscription.await_tx_accepted(txid).await {
                 Ok(()) => {
                     // when the transaction has ecash output, we need to make sure its claimed
-                    match self.client_ctx
+                    match client_ctx
                         .await_primary_module_outputs(operation_id, change)
                         .await
                         .context("Ensuring that the transaction is successful!") {
@@ -657,7 +636,7 @@ impl ModuleInit for EscrowClientInit {
     type Common = EscrowCommonInit;
     const DATABASE_VERSION: DatabaseVersion = DatabaseVersion(0);
 
-    fn dump_database(
+    async fn dump_database(
         &self,
         _dbtx: &mut DatabaseTransaction<'_>,
         _prefix_names: Vec<String>,
@@ -684,6 +663,7 @@ impl ClientModuleInit for EscrowClientInit {
                 deposit_fee: cfg.deposit_fee,
                 max_arbiter_fee_bps: cfg.max_arbiter_fee_bps,
             },
+            module_api: args.module_api().clone(),
             key: args
                 .module_root_secret()
                 .clone()
