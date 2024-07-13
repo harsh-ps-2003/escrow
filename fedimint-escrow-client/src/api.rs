@@ -14,6 +14,7 @@ impl<T: ?Sized> EscrowFederationApi for T
 where
     T: IModuleFederationApi + MaybeSend + MaybeSync + 'static,
 {
+    // gets the escrow info from the federation api
     async fn get_escrow_info(&self, escrow_id: String) -> anyhow::Result<EscrowInfo> {
         self.request_current_consensus(
             GET_MODULE_INFO.to_string(),

@@ -159,8 +159,6 @@ impl EscrowClientModule {
             state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
         };
 
-        // buyer gets statemachine as an asset to track the ecash issued!
-
         // Build and send tx to the fed by underfunding the transaction
         // The transaction builder will select the necessary e-cash notes with mint
         // output to cover the output amount and create the corresponding inputs itself
@@ -214,6 +212,7 @@ impl EscrowClientModule {
         {
             return Err(anyhow::anyhow!(EscrowError::ArbiterNotDecided));
         }
+
         let secp = Secp256k1::new();
         // Hash the secret code string
         let mut hasher = Sha256::new();
@@ -223,6 +222,7 @@ impl EscrowClientModule {
         let message = Message::from_slice(&hashed_message).expect("32 bytes");
         // Sign the message using Schnorr signature
         let signature = secp.sign_schnorr(&message, &self.key);
+
         let operation_id = OperationId(thread_rng().gen());
         // Transfer ecash to seller by overfunding the transaction
         // Create input using the buyer account
@@ -612,20 +612,6 @@ impl EscrowClientModule {
             }
         })))
     }
-
-    // /// Request the federation prints money for us for using in test
-    // pub async fn print_money(&self, amount: Amount) ->
-    // anyhow::Result<(OperationId, OutPoint)> {
-    //     self.print_using_account(amount, fed_key_pair()).await
-    // }
-
-    // /// Use a broken printer in test to print a liability instead of money
-    // /// If the federation is honest, should always fail
-    // pub async fn print_liability(&self, amount: Amount) ->
-    // anyhow::Result<(OperationId, OutPoint)> {
-    //     self.print_using_account(amount, broken_fed_key_pair())
-    //         .await
-    // }
 }
 
 /// The escrow client module initializer

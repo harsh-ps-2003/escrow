@@ -42,7 +42,6 @@ use strum::IntoEnumIterator;
 #[derive(Debug, Clone)]
 pub struct EscrowInit;
 
-// TODO: Boilerplate-code
 #[async_trait]
 impl ModuleInit for EscrowInit {
     type Common = EscrowCommonInit;
@@ -203,6 +202,7 @@ impl ServerModule for Escrow {
                 let mut escrow_value = self
                     .get_escrow_value(dbtx, escrow_input.escrow_id.clone())
                     .await?;
+
                 // check the signature of seller
                 let secp = Secp256k1::new();
                 let message = Message::from_slice(&escrow_input.hashed_message).expect("32 bytes");
@@ -238,6 +238,7 @@ impl ServerModule for Escrow {
                 let mut escrow_value = self
                     .get_escrow_value(dbtx, escrow_input.escrow_id.clone())
                     .await?;
+
                 // Determine who is disputing
                 let disputer = if escrow_input.disputer == escrow_value.buyer_pubkey {
                     Disputer::Buyer
@@ -292,6 +293,7 @@ impl ServerModule for Escrow {
                 let mut escrow_value = self
                     .get_escrow_value(dbtx, escrow_input.escrow_id.clone())
                     .await?;
+
                 // the escrow state should be disputed for the arbiter to take decision
                 if escrow_value.state != EscrowStates::DisputedByBuyer
                     && escrow_value.state != EscrowStates::DisputedBySeller
@@ -473,7 +475,7 @@ impl ServerModule for Escrow {
         //     .await;
     }
 
-    // api will be called in client
+    // api will be called in client by GET_MODULE_INFO endpoint
     fn api_endpoints(&self) -> Vec<ApiEndpoint<Self>> {
         vec![api_endpoint! {
             GET_MODULE_INFO,
@@ -512,6 +514,7 @@ impl Escrow {
         })
     }
 
+    // get the escrow value from the database using the escrow id
     async fn get_escrow_value<'a>(
         &self,
         dbtx: &mut DatabaseTransaction<'a>,
@@ -523,6 +526,7 @@ impl Escrow {
             .ok_or_else(|| EscrowInputError::EscrowNotFound)
     }
 
+    // get the escrow key from the escrow id
     async fn get_escrow_key<'a>(&self, escrow_id: String) -> EscrowKey {
         EscrowKey { escrow_id }
     }

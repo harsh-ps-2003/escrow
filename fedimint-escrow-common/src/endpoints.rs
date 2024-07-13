@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::EscrowStates;
 
-// get escrow information in the client side
+/// get escrow information in the client side
 pub const GET_MODULE_INFO: &str = "get_module_info";
 
 /// EscrowInfo is the response to the GET_MODULE_INFO request
