@@ -37,5 +37,6 @@ clap = "4.5.8"
 [build-dependencies]
 fedimint-build = { git = "https://github.com/fedimint/fedimint" }
 
-# [features]
-# cli = ["../fedimint-escrow-client/cli"]
+[features]
+default =[]
+cli = []
