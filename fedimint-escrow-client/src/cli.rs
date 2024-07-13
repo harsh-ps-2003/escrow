@@ -41,6 +41,7 @@ enum Command {
     SellerClaim {
         escrow_id: String,
     },
+    PublicKey {},
 }
 
 /// Handles the CLI command for the escrow module
@@ -183,6 +184,9 @@ pub(crate) async fn handle_cli_command(
                 "status": "resolved!"
             }))
         }
+        Command::PublicKey {} => Ok(json!({
+            "public_key": escrow.key.public_key().to_string()
+        })),
     };
 
     res

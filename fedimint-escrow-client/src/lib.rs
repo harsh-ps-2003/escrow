@@ -19,7 +19,7 @@ use fedimint_core::module::{
     ApiVersion, ModuleCommon, ModuleInit, MultiApiVersion, TransactionItemAmount,
 };
 use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint, TransactionId};
-use fedimint_escrow_common::config::{EscrowClientConfig, EscrowConfigConsensus};
+use fedimint_escrow_common::config::EscrowClientConfig;
 use fedimint_escrow_common::endpoints::EscrowInfo;
 use fedimint_escrow_common::{
     ArbiterDecision, EscrowCommonInit, EscrowError, EscrowInput, EscrowInputArbiterDecision,
