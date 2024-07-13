@@ -443,7 +443,7 @@ impl ServerModule for Escrow {
         _dbtx: &mut DatabaseTransaction<'_>,
         _out_point: OutPoint,
     ) -> Option<EscrowOutputOutcome> {
-        unimplemented!()
+        Some(EscrowOutputOutcome {})
     }
 
     async fn audit(
@@ -452,7 +452,7 @@ impl ServerModule for Escrow {
         _audit: &mut Audit,
         _module_instance_id: ModuleInstanceId,
     ) {
-        unimplemented!()
+        // unimplemented!()
         // audit
         //     .add_items(
         //         dbtx,

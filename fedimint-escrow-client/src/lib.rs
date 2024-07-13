@@ -41,7 +41,6 @@ use crate::states::{EscrowClientContext, EscrowStateMachine};
 #[derive(Debug)]
 pub struct EscrowClientModule {
     cfg: EscrowClientConfig,
-    consensus_cfg: EscrowConfigConsensus,
     key: KeyPair,
     client_ctx: ClientContext<Self>,
     module_api: DynModuleApi,
@@ -131,7 +130,7 @@ impl EscrowClientModule {
         let operation_id = OperationId(thread_rng().gen());
 
         // Validate max_arbiter_fee_bps (should be in range 10 to 1000)
-        if let Err(e) = self.consensus_cfg.limit_max_arbiter_fee_bps() {
+        if let Err(e) = self.cfg.limit_max_arbiter_fee_bps() {
             return Err(anyhow::anyhow!("Invalid max_arbiter_fee_bps: {}", e));
         }
 
@@ -661,10 +660,6 @@ impl ClientModuleInit for EscrowClientInit {
         let cfg = args.cfg().clone();
         Ok(EscrowClientModule {
             cfg: cfg.clone(),
-            consensus_cfg: EscrowConfigConsensus {
-                deposit_fee: cfg.deposit_fee,
-                max_arbiter_fee_bps: cfg.max_arbiter_fee_bps,
-            },
             module_api: args.module_api().clone(),
             key: args
                 .module_root_secret()

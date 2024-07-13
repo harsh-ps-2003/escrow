@@ -5,7 +5,7 @@ use std::fmt;
 use config::EscrowClientConfig;
 use fedimint_core::core::{Decoder, ModuleInstanceId, ModuleKind};
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::{CommonModuleInit, ModuleConsensusVersion};
+use fedimint_core::module::{CommonModuleInit, ModuleCommon, ModuleConsensusVersion};
 use fedimint_core::{plugin_types_trait_impl_common, Amount};
 use hex;
 use secp256k1::schnorr::Signature;
@@ -30,8 +30,8 @@ pub const CONSENSUS_VERSION: ModuleConsensusVersion = ModuleConsensusVersion::ne
 pub struct EscrowConsensusItem;
 
 impl std::fmt::Display for EscrowConsensusItem {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        unimplemented!()
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EscrowConsensusItem")
     }
 }
 
@@ -199,26 +199,12 @@ impl From<secp256k1::Error> for EscrowInputError {
 #[derive(Debug, Clone)]
 pub struct EscrowModuleTypes;
 
-impl CommonModuleInit for EscrowModuleTypes {
-    const CONSENSUS_VERSION: ModuleConsensusVersion = CONSENSUS_VERSION;
-    const KIND: ModuleKind = KIND;
-
-    type ClientConfig = EscrowClientConfig;
-
-    fn decoder() -> Decoder {
-        let mut builder = Decoder::builder();
-        builder.with_decodable_type::<EscrowInput>();
-        builder.with_decodable_type::<EscrowOutput>();
-        builder.build()
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub enum EscrowOutputOutcome {}
+pub struct EscrowOutputOutcome {}
 
 impl std::fmt::Display for EscrowOutputOutcome {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        unimplemented!()
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EscrowOutputOutcome")
     }
 }
 
@@ -245,10 +231,7 @@ impl CommonModuleInit for EscrowCommonInit {
     type ClientConfig = EscrowClientConfig;
 
     fn decoder() -> Decoder {
-        let mut builder = Decoder::builder();
-        builder.with_decodable_type::<EscrowInput>();
-        builder.with_decodable_type::<EscrowOutput>();
-        builder.build()
+        EscrowModuleTypes::decoder_builder().build()
     }
 }
 
