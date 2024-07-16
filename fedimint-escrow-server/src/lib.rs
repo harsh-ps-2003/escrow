@@ -1,8 +1,12 @@
+mod db;
+
 use std::collections::BTreeMap;
+use std::time::SystemTime;
 
 use anyhow::bail;
 use async_trait::async_trait;
-use chrono::prelude::*;
+pub use db::EscrowValue;
+use db::{DbKeyPrefix, EscrowKey};
 use fedimint_core::config::{
     ConfigGenModuleParams, DkgResult, ServerModuleConfig, ServerModuleConsensusConfig,
     TypedServerModuleConfig, TypedServerModuleConsensusConfig,
@@ -10,36 +14,34 @@ use fedimint_core::config::{
 use fedimint_core::core::ModuleInstanceId;
 use fedimint_core::db::{
     DatabaseTransaction, DatabaseVersion, IDatabaseTransactionOpsCoreTyped, NonCommittable,
-    ServerMigrationFn,
 };
 use fedimint_core::module::audit::Audit;
 use fedimint_core::module::{
-    api_endpoint, ApiEndpoint, CoreConsensusVersion, InputMeta, ModuleConsensusVersion, ModuleInit,
-    PeerHandle, ServerModuleInit, ServerModuleInitArgs, SupportedModuleApiVersions,
-    TransactionItemAmount,
+    api_endpoint, ApiEndpoint, ApiError, ApiVersion, CoreConsensusVersion, InputMeta,
+    ModuleConsensusVersion, ModuleInit, PeerHandle, ServerModuleInit, ServerModuleInitArgs,
+    SupportedModuleApiVersions, TransactionItemAmount,
 };
 use fedimint_core::server::DynServerModule;
 use fedimint_core::{push_db_pair_items, Amount, OutPoint, PeerId, ServerModule};
-use fedimint_escrow_client::CODE;
 use fedimint_escrow_common::config::{
     EscrowClientConfig, EscrowConfig, EscrowConfigConsensus, EscrowConfigLocal,
     EscrowConfigPrivate, EscrowGenParams,
 };
+use fedimint_escrow_common::endpoints::{EscrowInfo, GET_MODULE_INFO};
 use fedimint_escrow_common::{
-    broken_fed_public_key, fed_public_key, hash256, ApiError, EscrowCommonInit,
-    EscrowConsensusItem, EscrowInput, EscrowInputError, EscrowModuleTypes, EscrowOutput,
-    EscrowOutputError, GetModuleInfoRequest, ModuleInfo, CONSENSUS_VERSION,
+    hash256, ArbiterDecision, Disputer, EscrowCommonInit, EscrowConsensusItem, EscrowInput,
+    EscrowInputError, EscrowModuleTypes, EscrowOutput, EscrowOutputError, EscrowOutputOutcome,
+    EscrowStates, CONSENSUS_VERSION,
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
-use sha2::{Digest, Sha256};
-
-use crate::db::{DbKeyPrefix, EscrowKey, NonceKey, NonceKeyPrefix};
+use futures::StreamExt;
+use secp256k1::{Message, Secp256k1, XOnlyPublicKey};
+use strum::IntoEnumIterator;
 
 /// Generates the module
 #[derive(Debug, Clone)]
 pub struct EscrowInit;
 
-// TODO: Boilerplate-code
 #[async_trait]
 impl ModuleInit for EscrowInit {
     type Common = EscrowCommonInit;
@@ -51,24 +53,25 @@ impl ModuleInit for EscrowInit {
         dbtx: &mut DatabaseTransaction<'_>,
         prefix_names: Vec<String>,
     ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
-        // TODO: Boilerplate-code
         let mut items: BTreeMap<String, Box<dyn erased_serde::Serialize + Send>> = BTreeMap::new();
         let filtered_prefixes = DbKeyPrefix::iter().filter(|f| {
             prefix_names.is_empty() || prefix_names.contains(&f.to_string().to_lowercase())
         });
 
-        for table in filtered_prefixes {
-            match table {
+        for prefix in filtered_prefixes {
+            match prefix {
                 DbKeyPrefix::Escrow => {
                     push_db_pair_items!(
-                        dbtx, Escrow, EscrowKey,
-                        Amount, // i guess it should be string (ecash)
-                        items, "Escrow"
+                        dbtx,
+                        DbKeyPrefix::Escrow,
+                        EscrowKey,
+                        EscrowValue,
+                        items,
+                        "Escrow"
                     );
                 }
             }
         }
-
         Box::new(items.into_iter())
     }
 }
@@ -112,6 +115,7 @@ impl ServerModuleInit for EscrowInit {
                     private: EscrowConfigPrivate,
                     consensus: EscrowConfigConsensus {
                         deposit_fee: params.consensus.deposit_fee,
+                        max_arbiter_fee_bps: params.consensus.max_arbiter_fee_bps,
                     },
                 };
                 (peer, config.to_erased())
@@ -132,6 +136,7 @@ impl ServerModuleInit for EscrowInit {
             private: EscrowConfigPrivate,
             consensus: EscrowConfigConsensus {
                 deposit_fee: params.consensus.deposit_fee,
+                max_arbiter_fee_bps: params.consensus.max_arbiter_fee_bps,
             },
         }
         .to_erased())
@@ -145,6 +150,7 @@ impl ServerModuleInit for EscrowInit {
         let config = EscrowConfigConsensus::from_erased(config)?;
         Ok(EscrowClientConfig {
             deposit_fee: config.deposit_fee,
+            max_arbiter_fee_bps: config.max_arbiter_fee_bps,
         })
     }
 
@@ -157,7 +163,7 @@ impl ServerModuleInit for EscrowInit {
     }
 }
 
-/// escrow module
+/// The escrow module
 #[derive(Debug)]
 pub struct Escrow {
     pub cfg: EscrowConfig,
@@ -177,8 +183,6 @@ impl ServerModule for Escrow {
         Vec::new()
     }
 
-    // enum of possible transitions for the state
-    // TODO : will use consensus items for dispute!
     async fn process_consensus_item<'a, 'b>(
         &'a self,
         _dbtx: &mut DatabaseTransaction<'b>,
@@ -186,9 +190,6 @@ impl ServerModule for Escrow {
         _peer_id: PeerId,
     ) -> anyhow::Result<()> {
         bail!("The escrow module does not use consensus items");
-        // consensus item should be created for a dispute
-        // state change here instead of `process_input` for disputes
-        // how will we get seller and buyers keypair for transaction building?
     }
 
     async fn process_input<'a, 'b, 'c>(
@@ -196,102 +197,264 @@ impl ServerModule for Escrow {
         dbtx: &mut DatabaseTransaction<'c>,
         input: &'b EscrowInput,
     ) -> Result<InputMeta, EscrowInputError> {
-        let escrow_key = EscrowKey {
-            escrow_id: input.escrow_id.to_string(),
-        };
-        let mut escrow_value: EscrowValue = dbtx
-            .get_value(&escrow_key)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Escrow not found"))?; // use EscrowError for this
+        match input {
+            EscrowInput::ClamingWithoutDispute(escrow_input) => {
+                let mut escrow_value = self
+                    .get_escrow_value(dbtx, escrow_input.escrow_id.clone())
+                    .await?;
 
-        match input.action {
-            EscrowAction::Claim => match escrow_value.state {
-                EscrowStates::Open => {
-                    escrow_value.state = EscrowStates::ResolvedWithoutDispute;
-                    self.delete_escrow_data(dbtx, &escrow_key.escrow_id).await?;
+                // check the signature of seller
+                let secp = Secp256k1::new();
+                let message = Message::from_slice(&escrow_input.hashed_message).expect("32 bytes");
+                let xonly_pubkey =
+                    XOnlyPublicKey::from_slice(&escrow_value.seller_pubkey.serialize())?;
+
+                if !secp
+                    .verify_schnorr(&escrow_input.signature, &message, &xonly_pubkey)
+                    .is_ok()
+                {
+                    return Err(EscrowInputError::InvalidSeller);
                 }
-                EscrowStates::Disputed => {
-                    escrow_value.state = EscrowStates::ResolvedWithDispute;
-                    self.delete_escrow_data(dbtx, &escrow_key.escrow_id).await?;
+
+                // the secret code when hashed should be the same as the one in the db
+                if escrow_value.secret_code_hash != hash256(escrow_input.secret_code.clone()) {
+                    return Err(EscrowInputError::InvalidSecretCode);
                 }
-                _ => return Err(anyhow!("Invalid state for claiming escrow").into()),
-            },
-            EscrowAction::Dispute => {
-                escrow_value.state = EscrowStates::Disputed;
-            }
-            EscrowAction::Retreat => {
                 escrow_value.state = EscrowStates::ResolvedWithoutDispute;
-                self.delete_escrow_data(dbtx, &escrow_key.escrow_id).await?;
+
+                // Update the escrow value in the database
+                let escrow_key = self.get_escrow_key(escrow_input.escrow_id.clone()).await;
+                dbtx.insert_entry(&escrow_key, &escrow_value).await;
+
+                Ok(InputMeta {
+                    amount: TransactionItemAmount {
+                        amount: escrow_input.amount,
+                        fee: Amount::ZERO,
+                    },
+                    pub_key: escrow_value.seller_pubkey, // the one who is getting the ecash
+                })
+            }
+            EscrowInput::Disputing(escrow_input) => {
+                let mut escrow_value = self
+                    .get_escrow_value(dbtx, escrow_input.escrow_id.clone())
+                    .await?;
+
+                // Determine who is disputing
+                let disputer = if escrow_input.disputer == escrow_value.buyer_pubkey {
+                    Disputer::Buyer
+                } else if escrow_input.disputer == escrow_value.seller_pubkey {
+                    Disputer::Seller
+                } else {
+                    return Err(EscrowInputError::UnauthorizedToDispute);
+                };
+
+                // check the signature of disputer
+                let secp = Secp256k1::new();
+                let message = Message::from_slice(&escrow_input.hashed_message).expect("32 bytes");
+                let xonly_pubkey = match disputer {
+                    Disputer::Buyer => {
+                        XOnlyPublicKey::from_slice(&escrow_value.buyer_pubkey.serialize())?
+                    }
+                    Disputer::Seller => {
+                        XOnlyPublicKey::from_slice(&escrow_value.seller_pubkey.serialize())?
+                    }
+                };
+
+                if !secp
+                    .verify_schnorr(&escrow_input.signature, &message, &xonly_pubkey)
+                    .is_ok()
+                {
+                    return Err(EscrowInputError::InvalidArbiter);
+                }
+
+                match escrow_value.state {
+                    EscrowStates::Open => {
+                        escrow_value.state = match disputer {
+                            Disputer::Buyer => EscrowStates::DisputedByBuyer,
+                            Disputer::Seller => EscrowStates::DisputedBySeller,
+                        };
+                    }
+                    _ => return Err(EscrowInputError::InvalidStateForInitiatingDispute),
+                }
+
+                // Update the escrow value in the database
+                let escrow_key = self.get_escrow_key(escrow_input.escrow_id.clone()).await;
+                dbtx.insert_entry(&escrow_key, &escrow_value).await;
+
+                Ok(InputMeta {
+                    amount: TransactionItemAmount {
+                        amount: Amount::ZERO,
+                        fee: Amount::ZERO,
+                    },
+                    pub_key: escrow_input.disputer,
+                })
+            }
+            EscrowInput::ArbiterDecision(escrow_input) => {
+                let mut escrow_value = self
+                    .get_escrow_value(dbtx, escrow_input.escrow_id.clone())
+                    .await?;
+
+                // the escrow state should be disputed for the arbiter to take decision
+                if escrow_value.state != EscrowStates::DisputedByBuyer
+                    && escrow_value.state != EscrowStates::DisputedBySeller
+                {
+                    return Err(EscrowInputError::EscrowNotDisputed);
+                }
+
+                // check the signature of arbiter
+                let secp = Secp256k1::new();
+                let message = Message::from_slice(&escrow_input.hashed_message).expect("32 bytes");
+                let xonly_pubkey =
+                    XOnlyPublicKey::from_slice(&escrow_value.arbiter_pubkey.serialize())?;
+
+                if !secp
+                    .verify_schnorr(&escrow_input.signature, &message, &xonly_pubkey)
+                    .is_ok()
+                {
+                    return Err(EscrowInputError::InvalidArbiter);
+                }
+
+                // Validate arbiter's fee
+                if escrow_input.amount > escrow_value.max_arbiter_fee {
+                    return Err(EscrowInputError::ArbiterFeeExceedsMaximum);
+                } else {
+                    // the contract amount is the amount of ecash in the contract - arbiter fee
+                    escrow_value.amount = escrow_value.amount - escrow_input.amount;
+                }
+
+                // Update the escrow state based on the arbiter's decision
+                match escrow_input.arbiter_decision {
+                    ArbiterDecision::BuyerWins => {
+                        escrow_value.state = EscrowStates::WaitingforBuyerToClaim;
+                    }
+                    ArbiterDecision::SellerWins => {
+                        escrow_value.state = EscrowStates::WaitingforSellerToClaim;
+                    }
+                }
+
+                // Update the escrow value in the database
+                let escrow_key = self.get_escrow_key(escrow_input.escrow_id.clone()).await;
+                dbtx.insert_entry(&escrow_key, &escrow_value).await;
+
+                Ok(InputMeta {
+                    amount: TransactionItemAmount {
+                        amount: escrow_input.amount,
+                        fee: Amount::ZERO,
+                    },
+                    pub_key: escrow_value.arbiter_pubkey, // the one who is getting the ecash
+                })
+            }
+            EscrowInput::ClaimingAfterDispute(escrow_input) => {
+                let mut escrow_value = self
+                    .get_escrow_value(dbtx, escrow_input.escrow_id.clone())
+                    .await?;
+                match escrow_value.state {
+                    EscrowStates::WaitingforBuyerToClaim => {
+                        // check the signature of buyer
+                        let secp = Secp256k1::new();
+                        let message =
+                            Message::from_slice(&escrow_input.hashed_message).expect("32 bytes");
+                        let xonly_pubkey =
+                            XOnlyPublicKey::from_slice(&escrow_value.buyer_pubkey.serialize())?;
+
+                        if !secp
+                            .verify_schnorr(&escrow_input.signature, &message, &xonly_pubkey)
+                            .is_ok()
+                        {
+                            return Err(EscrowInputError::InvalidArbiter);
+                        }
+                        escrow_value.state = EscrowStates::ResolvedWithDispute;
+
+                        // Update the escrow value in the database
+                        let escrow_key = self.get_escrow_key(escrow_input.escrow_id.clone()).await;
+                        dbtx.insert_entry(&escrow_key, &escrow_value).await;
+
+                        Ok(InputMeta {
+                            amount: TransactionItemAmount {
+                                amount: escrow_input.amount,
+                                fee: Amount::ZERO,
+                            },
+                            pub_key: escrow_value.seller_pubkey, // the one who is getting the ecash
+                        })
+                    }
+                    EscrowStates::WaitingforSellerToClaim => {
+                        // check the signature of buyer
+                        let secp = Secp256k1::new();
+                        let message =
+                            Message::from_slice(&escrow_input.hashed_message).expect("32 bytes");
+                        let xonly_pubkey =
+                            XOnlyPublicKey::from_slice(&escrow_value.seller_pubkey.serialize())?;
+
+                        if !secp
+                            .verify_schnorr(&escrow_input.signature, &message, &xonly_pubkey)
+                            .is_ok()
+                        {
+                            return Err(EscrowInputError::InvalidArbiter);
+                        }
+                        escrow_value.state = EscrowStates::ResolvedWithDispute;
+
+                        // Update the escrow value in the database
+                        let escrow_key = self.get_escrow_key(escrow_input.escrow_id.clone()).await;
+                        dbtx.insert_entry(&escrow_key, &escrow_value).await;
+
+                        Ok(InputMeta {
+                            amount: TransactionItemAmount {
+                                amount: escrow_input.amount,
+                                fee: Amount::ZERO,
+                            },
+                            pub_key: escrow_value.seller_pubkey, // the one who is getting the ecash
+                        })
+                    }
+                    _ => return Err(EscrowInputError::InvalidStateForClaimingEscrow),
+                }
             }
         }
-
-        dbtx.insert_entry(&escrow_key, &escrow_value).await?;
-        dbtx.commit().await?;
-
-        Ok(InputMeta {
-            amount: TransactionItemAmount {
-                amount: input.amount,
-                fee: self.cfg.consensus.deposit_fee,
-            },
-            pub_key: self.key().public_key(),
-        })
     }
 
     async fn process_output<'a, 'b>(
         &'a self,
         dbtx: &mut DatabaseTransaction<'b>,
         output: &'a EscrowOutput,
-        out_point: OutPoint,
+        _out_point: OutPoint,
     ) -> Result<TransactionItemAmount, EscrowOutputError> {
         let escrow_key = EscrowKey {
-            uuid: output.escrow_id.to_string(),
+            escrow_id: output.escrow_id.clone(),
         };
-        let code_hash = hash256(CODE);
         let escrow_value = EscrowValue {
-            buyer: output.buyer,
-            seller: output.seller,
-            arbiter: output.arbiter,
-            amount: output.amount.to_string(),
-            code_hash,
-            state: output.state,
-            created_at: chrono::Utc::now().timestamp() as u64, /* set the timestamp for escrow
-                                                                * creation */
-            retreat_duration: output.retreat_duration,
+            buyer_pubkey: output.buyer_pubkey,
+            seller_pubkey: output.seller_pubkey,
+            arbiter_pubkey: output.arbiter_pubkey,
+            amount: output.amount,
+            secret_code_hash: output.secret_code_hash.clone(),
+            max_arbiter_fee: output.max_arbiter_fee,
+            state: EscrowStates::Open,
+            created_at: SystemTime::now(), // set the timestamp for escrow creation
         };
 
         // guardian db entry
-        dbtx.insert_new_entry(
-            &EscrowKey {
-                escrow_id: output.escrow_id.to_string(),
-            },
-            &escrow_value,
-        )
-        .await;
+        dbtx.insert_new_entry(&escrow_key, &escrow_value).await;
 
         Ok(TransactionItemAmount {
             amount: output.amount,
             fee: self.cfg.consensus.deposit_fee,
         })
-        // implemented! TODO : signature using public keys of buyer, seller and
-        // arbiter to secure it!
     }
 
     async fn output_status(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        out_point: OutPoint,
+        _dbtx: &mut DatabaseTransaction<'_>,
+        _out_point: OutPoint,
     ) -> Option<EscrowOutputOutcome> {
-        // check whether or not the output has been processed
-        dbtx.get_value(&EscrowKey(out_point)).await
+        Some(EscrowOutputOutcome {})
     }
 
     async fn audit(
         &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        audit: &mut Audit,
-        module_instance_id: ModuleInstanceId,
+        _dbtx: &mut DatabaseTransaction<'_>,
+        _audit: &mut Audit,
+        _module_instance_id: ModuleInstanceId,
     ) {
-        unimplemented!()
+        // unimplemented!()
         // audit
         //     .add_items(
         //         dbtx,
@@ -312,25 +475,15 @@ impl ServerModule for Escrow {
         //     .await;
     }
 
-    // api will be called in client
+    // api will be called in client by GET_MODULE_INFO endpoint
     fn api_endpoints(&self) -> Vec<ApiEndpoint<Self>> {
-        vec![
-            api_endpoint! {
-                GET_MODULE_INFO,
-                ApiVersion::new(0, 0),
-                async |module: &Escrow, context, request: GetModuleInfoRequest| -> ModuleInfo {
-                    module.handle_get_module_info(&mut context.dbtx().into_nc(), &request).await
-                }
-            },
-            api_endpoint! {
-                GET_SECRET_CODE_HASH,
-                ApiVersion::new(0, 0),
-                async |module: &Escrow, context, escrow_id: String| -> Result<SecretCodeHash, EscrowError> {
-                    let request = GetSecretCodeHashRequest { escrow_id };
-                    module.handle_get_secret_code_hash(&mut context.dbtx().into_nc(), &request).await
-                }
-            },
-        ]
+        vec![api_endpoint! {
+            GET_MODULE_INFO,
+            ApiVersion::new(0, 0),
+            async |module: &Escrow, context, escrow_id: String| -> EscrowInfo {
+                module.handle_get_module_info(&mut context.dbtx().into_nc(), escrow_id).await
+            }
+        }]
     }
 }
 
@@ -343,54 +496,38 @@ impl Escrow {
     async fn handle_get_module_info(
         &self,
         dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
-        req: &GetModuleInfoRequest,
-    ) -> Result<ModuleInfo, ApiError> {
-        let escrow_value: Option<EscrowValue> = dbtx
-            .get_value(&EscrowKey {
-                escrow_id: req.escrow_id,
-            })
-            .await?;
-        match escrow_value {
-            Some(value) => Ok(ModuleInfo {
-                buyer: value.buyer,
-                seller: value.seller,
-                arbiter: value.arbiter,
-                amount: value.amount,
-                code_hash: value.code_hash,
-                state: value.state,
-            }),
-            None => Err(EscrowError::EscrowNotFound),
-        }
+        escrow_id: String,
+    ) -> Result<EscrowInfo, ApiError> {
+        let escrow_value: EscrowValue = dbtx
+            .get_value(&EscrowKey { escrow_id })
+            .await
+            .ok_or_else(|| ApiError::not_found("Escrow not found".to_string()))?;
+        Ok(EscrowInfo {
+            buyer_pubkey: escrow_value.buyer_pubkey,
+            seller_pubkey: escrow_value.seller_pubkey,
+            arbiter_pubkey: escrow_value.arbiter_pubkey,
+            amount: escrow_value.amount,
+            secret_code_hash: escrow_value.secret_code_hash,
+            state: escrow_value.state,
+            max_arbiter_fee: escrow_value.max_arbiter_fee,
+            created_at: escrow_value.created_at,
+        })
     }
 
-    async fn handle_get_secret_code_hash(
+    // get the escrow value from the database using the escrow id
+    async fn get_escrow_value<'a>(
         &self,
-        dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
-        req: &GetSecretCodeHashRequest,
-    ) -> Result<[u8; 32], EscrowError> {
-        let escrow_value: Option<EscrowValue> = dbtx
-            .get_value(&EscrowKey {
-                escrow_id: req.escrow_id.clone(),
-            })
-            .await?;
-
-        match escrow_value {
-            Some(value) => Ok(value.code_hash),
-            None => Err(EscrowError::EscrowNotFound),
-        }
+        dbtx: &mut DatabaseTransaction<'a>,
+        escrow_id: String,
+    ) -> Result<EscrowValue, EscrowInputError> {
+        let escrow_key = self.get_escrow_key(escrow_id).await;
+        dbtx.get_value(&escrow_key)
+            .await
+            .ok_or_else(|| EscrowInputError::EscrowNotFound)
     }
 
-    async fn delete_escrow_data(
-        &self,
-        dbtx: &mut DatabaseTransaction<'_>,
-        escrow_id: &str,
-    ) -> Result<(), EscrowError> {
-        let escrow_key = EscrowKey {
-            escrow_id: escrow_id.to_string(),
-        };
-
-        dbtx.remove_entry(&escrow_key).await?;
-
-        Ok(())
+    // get the escrow key from the escrow id
+    async fn get_escrow_key<'a>(&self, escrow_id: String) -> EscrowKey {
+        EscrowKey { escrow_id }
     }
 }

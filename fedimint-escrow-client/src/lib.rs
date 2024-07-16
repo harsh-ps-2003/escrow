@@ -1,43 +1,62 @@
+pub mod api;
+pub mod cli;
+pub mod states;
+#[cfg(feature = "cli")]
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context as _};
+use anyhow::Context as _;
+use async_stream::stream;
+use async_trait::async_trait;
 use fedimint_client::module::init::{ClientModuleInit, ClientModuleInitArgs};
 use fedimint_client::module::recovery::NoModuleBackup;
 use fedimint_client::module::{ClientContext, ClientModule};
-use fedimint_client::sm::{Context, ModuleNotifier};
+use fedimint_client::oplog::UpdateStreamOrOutcome;
 use fedimint_client::transaction::{ClientInput, ClientOutput, TransactionBuilder};
-use fedimint_core::core::{Decoder, KeyPair, OperationId};
-use fedimint_core::db::Database;
-use fedimint_core::module::{ApiVersion, ModuleCommon, MultiApiVersion, TransactionItemAmount};
-use fedimint_core::{apply, async_trait_maybe_send, Amount, OperationId, OutPoint};
+use fedimint_core::api::DynModuleApi;
+use fedimint_core::core::{KeyPair, OperationId};
+use fedimint_core::db::{Database, DatabaseTransaction, DatabaseVersion};
+use fedimint_core::module::{
+    ApiVersion, ModuleCommon, ModuleInit, MultiApiVersion, TransactionItemAmount,
+};
+use fedimint_core::{apply, async_trait_maybe_send, Amount, OutPoint, TransactionId};
 use fedimint_escrow_common::config::EscrowClientConfig;
-use fedimint_escrow_common::{hash256, EscrowInput, EscrowModuleTypes, EscrowOutput, KIND};
-use fedimint_escrow_server::states::EscrowStateMachine;
-use rand::Rng;
-use secp256k1::{PublicKey, Secp256k1};
+use fedimint_escrow_common::endpoints::EscrowInfo;
+use fedimint_escrow_common::{
+    ArbiterDecision, EscrowCommonInit, EscrowError, EscrowInput, EscrowInputArbiterDecision,
+    EscrowInputClaimingAfterDispute, EscrowInputClamingWithoutDispute, EscrowInputDisputing,
+    EscrowModuleTypes, EscrowOutput, EscrowStates, KIND,
+};
+use futures::StreamExt;
+use rand::{thread_rng, Rng};
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
+use secp256k1::{Message, PublicKey, Secp256k1};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-use crate::cli::CODE;
+use crate::api::EscrowFederationApi;
+use crate::states::{EscrowClientContext, EscrowStateMachine};
 
-#[cfg(feature = "cli")]
-pub mod cli;
-
+/// The escrow client module
 #[derive(Debug)]
 pub struct EscrowClientModule {
     cfg: EscrowClientConfig,
     key: KeyPair,
-    notifier: ModuleNotifier<EscrowStateMachine>,
     client_ctx: ClientContext<Self>,
+    module_api: DynModuleApi,
     db: Database,
 }
 
-/// Data needed by the state machine
-#[derive(Debug, Clone)]
-pub struct EscrowClientContext {
-    pub escrow_decoder: Decoder,
+/// The high level state for tracking operations of transactions
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum EscrowOperationState {
+    /// The transaction is being processed by the federation
+    Created,
+    /// The transaction is accepted by the federation
+    Accepted,
+    /// The transaction is rejected by the federation
+    Rejected,
 }
-
-// escrow module doesn't need local context
-impl Context for EscrowClientContext {}
 
 #[apply(async_trait_maybe_send!)]
 impl ClientModule for EscrowClientModule {
@@ -49,23 +68,34 @@ impl ClientModule for EscrowClientModule {
 
     fn context(&self) -> Self::ModuleStateMachineContext {
         EscrowClientContext {
-            escrow_decoder: self.decoder(),
+            escrow_decoder: EscrowModuleTypes::decoder(),
         }
     }
 
-    // conveys the monetary value of escrow input
+    /// conveys the monetary value of escrow input
     fn input_amount(
         &self,
         input: &<Self::Common as ModuleCommon>::Input,
     ) -> Option<TransactionItemAmount> {
-        Some(TransactionItemAmount {
-            amount: input.amount,
-            fee: Amount::ZERO, // seller does not need to pay any fee to get the ecash
-        })
+        match input {
+            EscrowInput::ClamingWithoutDispute(input) => Some(TransactionItemAmount {
+                amount: input.amount,
+                fee: Amount::ZERO,
+            }),
+            EscrowInput::ClaimingAfterDispute(input) => Some(TransactionItemAmount {
+                amount: input.amount,
+                fee: Amount::ZERO,
+            }),
+            EscrowInput::ArbiterDecision(input) => Some(TransactionItemAmount {
+                amount: input.amount,
+                fee: Amount::ZERO,
+            }),
+            EscrowInput::Disputing(_) => None, // Disputing doesn't involve an amount
+        }
     }
 
-    // conveys to the transaction the monetary value of escrow output so as to burn
-    // the equivalent ecash
+    /// conveys to the transaction the monetary value of escrow output so as to
+    /// burn the equivalent ecash
     fn output_amount(
         &self,
         output: &<Self::Common as ModuleCommon>::Output,
@@ -87,144 +117,520 @@ impl ClientModule for EscrowClientModule {
 }
 
 impl EscrowClientModule {
-    // attach ecash to the transaction and submit it to federation
-    pub async fn buyer_txn(
+    /// Handles the buyer transaction for the escrow creation
+    pub async fn create_escrow(
         &self,
         amount: Amount,
-        buyer: PublicKey,
-        seller: PublicKey,
-        arbiter: PublicKey,
-        retreat_duration: u64,
+        seller_pubkey: PublicKey,
+        arbiter_pubkey: PublicKey,
+        escrow_id: String,
+        secret_code_hash: String,
+        max_arbiter_fee_bps: u16,
     ) -> anyhow::Result<(OperationId, OutPoint)> {
         let operation_id = OperationId(thread_rng().gen());
-        let escrow_id = hash256(vec![buyer, seller, arbiter, amount.to_string()].concat()); // create escrow id by hashing buyer, seller, arbiter, amount in a ascending
-                                                                                            // order
 
+        // Validate max_arbiter_fee_bps (should be in range 10 to 1000)
+        if let Err(e) = self.cfg.limit_max_arbiter_fee_bps() {
+            return Err(anyhow::anyhow!("Invalid max_arbiter_fee_bps: {}", e));
+        }
+
+        // converting bps to percentage
+        let fee_percentage = Decimal::from(max_arbiter_fee_bps) / Decimal::from(100);
+        // getting the maximum arbiter fee that can be charged
+        let max_arbiter_fee: Amount = Amount::from_sats(
+            (Decimal::from(amount.msats) * fee_percentage / Decimal::from(1000))
+                .to_u64()
+                .unwrap(),
+        );
+
+        // creating output for buyers transaction by underfunding
         let output = EscrowOutput {
             amount,
-            buyer,
-            seller,
-            arbiter,
-            state: EscrowStates::Open,
+            buyer_pubkey: self.key.public_key(),
+            seller_pubkey,
+            arbiter_pubkey,
             escrow_id,
-            retreat_duration,
+            secret_code_hash,
+            max_arbiter_fee,
         };
 
-        // buyer gets statemachine as an asset to track the ecash issued!
+        let client_output = ClientOutput {
+            output,
+            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
+        };
 
         // Build and send tx to the fed by underfunding the transaction
         // The transaction builder will select the necessary e-cash notes with mint
         // output to cover the output amount and create the corresponding inputs itself
-        let tx = TransactionBuilder::new().with_output(self.client_ctx.make_client_output(output));
+        let tx = TransactionBuilder::new()
+            .with_output(self.client_ctx.make_client_output(client_output));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (_, change) = self
+        let (txid, change) = self
             .client_ctx
-            .finalize_and_submit_transaction(op_id, KIND.as_str(), outpoint, tx)
+            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
-        let tx_subscription = self.client_ctx.transaction_updates(op_id).await;
-
-        tx_subscription
-            .await_tx_accepted(txid)
+        // Subscribe to transaction updates
+        let mut updates = self
+            .subscribe_transactions_output(operation_id, txid, change.clone())
             .await
-            .map_err(|e| anyhow!(e))?;
+            .unwrap()
+            .into_stream();
 
-        Ok((operation_id, change[0], escrow_id))
+        // Process the update stream
+        while let Some(update) = updates.next().await {
+            match update {
+                EscrowOperationState::Created | EscrowOperationState::Accepted => {}
+                EscrowOperationState::Rejected => {
+                    return Err(anyhow::anyhow!(EscrowError::TransactionRejected));
+                }
+            }
+        }
+
+        Ok((operation_id, change[0]))
     }
 
-    // dont involve consensus until necessary
-    // code should not work when arbiter is not involved!
-    // when arbiter involved, 2 txns are involved!
-
-    pub async fn seller_txn(
+    /// Handles the seller transaction to claim the funds that are locked in the
+    /// escrow upon providing the secret code
+    pub async fn claim_escrow(
         &self,
         escrow_id: String,
-        secret_code: String,
         amount: Amount,
+        secret_code: String,
     ) -> anyhow::Result<()> {
+        // make an api call to server db and get the secret code hash and state of
+        // escrow, and then verify it
+        let escrow_value: EscrowInfo = self.module_api.get_escrow_info(escrow_id.clone()).await?;
+        // the escrow should not be in dispute when seller wants to claim
+        if escrow_value.state == EscrowStates::DisputedByBuyer
+            || escrow_value.state == EscrowStates::DisputedBySeller
+        {
+            return Err(anyhow::anyhow!(EscrowError::EscrowDisputed));
+        }
+        if escrow_value.state != EscrowStates::WaitingforSellerToClaim
+            && escrow_value.state != EscrowStates::Open
+        {
+            return Err(anyhow::anyhow!(EscrowError::ArbiterNotDecided));
+        }
+
+        let secp = Secp256k1::new();
+        // Hash the secret code string
+        let mut hasher = Sha256::new();
+        hasher.update(secret_code.as_bytes());
+        let hashed_message: [u8; 32] = hasher.finalize().into();
+        // Create the message from the hash
+        let message = Message::from_slice(&hashed_message).expect("32 bytes");
+        // Sign the message using Schnorr signature
+        let signature = secp.sign_schnorr(&message, &self.key);
+
         let operation_id = OperationId(thread_rng().gen());
         // Transfer ecash to seller by overfunding the transaction
         // Create input using the buyer account
-        let input = EscrowInput {
+        let input = EscrowInput::ClamingWithoutDispute(EscrowInputClamingWithoutDispute {
             amount,
-            secret_code: Some(secret_code),
-            action: EscrowAction::Claim,
+            escrow_id,
+            secret_code: secret_code,
+            hashed_message: hashed_message,
+            signature: signature,
+        });
+
+        let client_input = ClientInput {
+            input,
+            keys: vec![],
+            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
         };
 
         // Build and send tx to the fed
         // The transaction builder will create mint output to cover the input amount by
         // itself
-        let tx = TransactionBuilder::new().with_input(self.client_ctx.make_client_input(input));
+        let tx =
+            TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (_, change) = self
+        let (txid, _change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
+        // Subscribe to transaction updates
+        let mut updates = self
+            .subscribe_transactions_input(operation_id, txid)
+            .await
+            .unwrap()
+            .into_stream();
+
+        // Process the update stream
+        while let Some(update) = updates.next().await {
+            match update {
+                EscrowOperationState::Created | EscrowOperationState::Accepted => {}
+                EscrowOperationState::Rejected => {
+                    return Err(anyhow::anyhow!(EscrowError::TransactionRejected));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handles the claiming of ecash by the buyer after the arbiter has decided
+    /// that buyer won the dispute
+    pub async fn buyer_claim(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
+        let operation_id = OperationId(thread_rng().gen());
+
+        let escrow_value: EscrowInfo = self.module_api.get_escrow_info(escrow_id.clone()).await?;
+        // the arbiter has not decided yet if the escrow is disputed!
+        if escrow_value.state == EscrowStates::DisputedByBuyer
+            || escrow_value.state == EscrowStates::DisputedBySeller
+        {
+            return Err(anyhow::anyhow!(EscrowError::ArbiterNotDecided));
+        }
+        // the state should be waiting for buyer to claim the ecash as arbiter has
+        // decided
+        if escrow_value.state != EscrowStates::WaitingforBuyerToClaim {
+            return Err(anyhow::anyhow!(EscrowError::ArbiterNotDecided));
+        }
+
+        let secp = Secp256k1::new();
+        // Hash the decision string
+        let mut hasher = Sha256::new();
+        hasher.update("buyer_claim".as_bytes());
+        let hashed_message: [u8; 32] = hasher.finalize().into();
+        // Create the message from the hash
+        let message = Message::from_slice(&hashed_message).expect("32 bytes");
+        // Sign the message using Schnorr signature
+        let signature = secp.sign_schnorr(&message, &self.key);
+
+        // Transfer ecash back to buyer after deduction of arbiter fee by underfunding
+        // the transaction
+        let input = EscrowInput::ClaimingAfterDispute(EscrowInputClaimingAfterDispute {
+            amount,
+            escrow_id,
+            hashed_message: hashed_message,
+            signature: signature,
+        });
+
+        let client_input = ClientInput {
+            input,
+            keys: vec![],
+            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
+        };
+
+        // Build and send tx to the fed
+        // The transaction builder will create mint output to cover the input amount by
+        // itself
+        let tx =
+            TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
+        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
+        let (txid, _change) = self
+            .client_ctx
+            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
+            .await?;
+
+        // Subscribe to transaction updates
+        let mut updates = self
+            .subscribe_transactions_input(operation_id, txid)
+            .await
+            .unwrap()
+            .into_stream();
+
+        // Process the update stream
+        while let Some(update) = updates.next().await {
+            match update {
+                EscrowOperationState::Created | EscrowOperationState::Accepted => {}
+                EscrowOperationState::Rejected => {
+                    return Err(anyhow::anyhow!(EscrowError::TransactionRejected));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handles the claiming of transaction by the seller after the arbiter has
+    /// decided that seller won the dispute
+    pub async fn seller_claim(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
+        let operation_id = OperationId(thread_rng().gen());
+
+        let escrow_value: EscrowInfo = self.module_api.get_escrow_info(escrow_id.clone()).await?;
+        // the arbiter has not decided yet if the escrow is disputed!
+        if escrow_value.state == EscrowStates::DisputedByBuyer
+            || escrow_value.state == EscrowStates::DisputedBySeller
+        {
+            return Err(anyhow::anyhow!(EscrowError::ArbiterNotDecided));
+        }
+        // the state should be waiting for seller to claim the ecash as arbiter has
+        // decided
+        if escrow_value.state != EscrowStates::WaitingforSellerToClaim {
+            return Err(anyhow::anyhow!(EscrowError::ArbiterNotDecided));
+        }
+
+        let secp = Secp256k1::new();
+        // Hash the decision string
+        let mut hasher = Sha256::new();
+        hasher.update("seller_claim".as_bytes());
+        let hashed_message: [u8; 32] = hasher.finalize().into();
+        // Create the message from the hash
+        let message = Message::from_slice(&hashed_message).expect("32 bytes");
+        // Sign the message using Schnorr signature
+        let signature = secp.sign_schnorr(&message, &self.key);
+
+        // Transfer ecash back to buyer by underfunding the transaction
+        let input = EscrowInput::ClaimingAfterDispute(EscrowInputClaimingAfterDispute {
+            amount,
+            escrow_id,
+            hashed_message: hashed_message,
+            signature: signature,
+        });
+
+        let client_input = ClientInput {
+            input,
+            keys: vec![],
+            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
+        };
+
+        // Build and send tx to the fed
+        // The transaction builder will create mint output to cover the input amount by
+        // itself
+        let tx =
+            TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
+        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
+        let (txid, _change) = self
+            .client_ctx
+            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
+            .await?;
+
+        // Subscribe to transaction updates
+        let mut updates = self
+            .subscribe_transactions_input(operation_id, txid)
+            .await
+            .unwrap()
+            .into_stream();
+
+        // Process the update stream
+        while let Some(update) = updates.next().await {
+            match update {
+                EscrowOperationState::Created | EscrowOperationState::Accepted => {}
+                EscrowOperationState::Rejected => {
+                    return Err(anyhow::anyhow!(EscrowError::TransactionRejected));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handles the initiation of dispute
+    pub async fn initiate_dispute(&self, escrow_id: String) -> anyhow::Result<()> {
+        let operation_id = OperationId(thread_rng().gen());
+
+        let secp = Secp256k1::new();
+        // Hash the decision string
+        let mut hasher = Sha256::new();
+        hasher.update("dispute".as_bytes());
+        let hashed_message: [u8; 32] = hasher.finalize().into();
+        // Create the message from the hash
+        let message = Message::from_slice(&hashed_message).expect("32 bytes");
+        // Sign the message using Schnorr signature using disputers keypair
+        let signature = secp.sign_schnorr(&message, &self.key);
+
+        let input = EscrowInput::Disputing(EscrowInputDisputing {
+            escrow_id: escrow_id,
+            disputer: self.key.public_key(),
+            hashed_message: hashed_message,
+            signature: signature,
+        });
+
+        let client_input = ClientInput {
+            input,
+            keys: vec![],
+            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
+        };
+
+        // Build and send tx to the fed
+        // The transaction builder will create mint output to cover the input amount by
+        // itself
+        let tx =
+            TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
+        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
+        let (txid, _change) = self
+            .client_ctx
+            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
+            .await?;
+
+        // Subscribe to transaction updates
+        let mut updates = self
+            .subscribe_transactions_input(operation_id, txid)
+            .await
+            .unwrap()
+            .into_stream();
+
+        // Process the update stream
+        while let Some(update) = updates.next().await {
+            match update {
+                EscrowOperationState::Created | EscrowOperationState::Accepted => {}
+                EscrowOperationState::Rejected => {
+                    return Err(anyhow::anyhow!(EscrowError::TransactionRejected));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handles the arbiter decision making on who won the dispute
+    pub async fn arbiter_decision(
+        &self,
+        escrow_id: String,
+        decision: String,
+        arbiter_fee_bps: u16,
+    ) -> anyhow::Result<()> {
+        let operation_id = OperationId(thread_rng().gen());
+
+        let arbiter_decision = match decision.to_lowercase().as_str() {
+            "buyer" => ArbiterDecision::BuyerWins,
+            "seller" => ArbiterDecision::SellerWins,
+            _ => return Err(anyhow::anyhow!(EscrowError::InvalidArbiterDecision)),
+        };
+
+        let escrow_value: EscrowInfo = self.module_api.get_escrow_info(escrow_id.clone()).await?;
+
+        // getting percentage from basis points
+        let fee_percentage = Decimal::from(arbiter_fee_bps) / Decimal::from(100);
+        // calculating arbiter fee
+        let arbiter_fee: Amount = Amount::from_sats(
+            (Decimal::from(escrow_value.amount.msats) * fee_percentage / Decimal::from(1000))
+                .to_u64()
+                .unwrap(),
+        );
+
+        let secp = Secp256k1::new();
+        // Hash the decision string
+        let mut hasher = Sha256::new();
+        hasher.update(decision.as_bytes());
+        let hashed_message: [u8; 32] = hasher.finalize().into();
+        // Create the message from the hash
+        let message = Message::from_slice(&hashed_message).expect("32 bytes");
+        // Sign the message using Schnorr signature
+        let signature = secp.sign_schnorr(&message, &self.key);
+
+        // Transfer ecash back to buyer by underfunding the transaction
+        let input = EscrowInput::ArbiterDecision(EscrowInputArbiterDecision {
+            amount: arbiter_fee,
+            escrow_id: escrow_id,
+            arbiter_decision,
+            hashed_message: hashed_message,
+            signature: signature,
+        });
+
+        let client_input = ClientInput {
+            input,
+            keys: vec![],
+            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
+        };
+
+        // Build and send tx to the fed
+        // The transaction builder will create mint output to cover the input amount by
+        // itself
+        let tx =
+            TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
+        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
+        let (txid, _change) = self
+            .client_ctx
+            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
+            .await?;
+
+        // Subscribe to transaction updates
+        let mut updates = self
+            .subscribe_transactions_input(operation_id, txid)
+            .await
+            .unwrap()
+            .into_stream();
+
+        // Process the update stream
+        while let Some(update) = updates.next().await {
+            match update {
+                EscrowOperationState::Created | EscrowOperationState::Accepted => {}
+                EscrowOperationState::Rejected => {
+                    return Err(anyhow::anyhow!(EscrowError::TransactionRejected));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Subscribes to the transaction updates and yields the state of operation,
+    /// when the transaction has input attached not output!
+    pub async fn subscribe_transactions_input(
+        &self,
+        operation_id: OperationId,
+        txid: TransactionId,
+    ) -> anyhow::Result<UpdateStreamOrOutcome<EscrowOperationState>> {
         let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
 
-        tx_subscription
-            .await_tx_accepted(txid)
-            .await
-            .map_err(|e| anyhow!(e))?;
+        Ok(UpdateStreamOrOutcome::UpdateStream(Box::pin(stream! {
+            yield EscrowOperationState::Created;
 
-        Ok(())
+            match tx_subscription.await_tx_accepted(txid).await {
+                Ok(()) => {
+                    yield EscrowOperationState::Accepted;
+                },
+                Err(_) => {
+                    yield EscrowOperationState::Rejected;
+                }
+            }
+        })))
     }
 
-    pub async fn retreat_txn(&self, escrow_id: String, amount: Amount) -> anyhow::Result<()> {
-        let operation_id = OperationId(thread_rng().gen());
-        // Transfer ecash back to buyer by underfunding the transaction
-        let input = EscrowInput {
-            amount,
-            secret_code: None,
-            action: EscrowAction::Retreat,
-        };
+    /// Subscribes to the transaction updates and yields the state of operation
+    /// when the transaction has output attached not input!
+    pub async fn subscribe_transactions_output(
+        &self,
+        operation_id: OperationId,
+        txid: TransactionId,
+        change: Vec<OutPoint>,
+    ) -> anyhow::Result<UpdateStreamOrOutcome<EscrowOperationState>> {
+        let tx_subscription = self.client_ctx.transaction_updates(operation_id).await;
+        let client_ctx = self.client_ctx.clone();
 
-        // Build and send tx to the fed
-        // The transaction builder will create mint output to cover the input amount by
-        // itself
-        let tx = TransactionBuilder::new().with_input(self.client_ctx.make_client_input(input));
-        let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (_, change) = self
-            .client_ctx
-            .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
-            .await?;
+        Ok(UpdateStreamOrOutcome::UpdateStream(Box::pin(stream! {
+            yield EscrowOperationState::Created;
 
-        let tx_subscription = self.client_ctx.transaction_updates(op_id).await;
-
-        tx_subscription
-            .await_tx_accepted(txid)
-            .await
-            .map_err(|e| anyhow!(e))?;
-
-        Ok(())
+            match tx_subscription.await_tx_accepted(txid).await {
+                Ok(()) => {
+                    // when the transaction has ecash output, we need to make sure its claimed
+                    match client_ctx
+                        .await_primary_module_outputs(operation_id, change)
+                        .await
+                        .context("Ensuring that the transaction is successful!") {
+                        Ok(_) => yield EscrowOperationState::Accepted,
+                        Err(_) => yield EscrowOperationState::Rejected,
+                    }
+                },
+                Err(_) => {
+                    yield EscrowOperationState::Rejected;
+                }
+            }
+        })))
     }
-
-    // think how arbiter will initiate dispute with a txn (input only) of its own
-    // and change state
-    pub async fn initiate_dispute(&self, escrow_id: String) -> anyhow::Result<()> {
-        // TODO : a consensus item submitted via guardian api endpoint? how and why?
-        // can dispute be rejected?
-        Ok(())
-    }
-
-    // /// Request the federation prints money for us for using in test
-    // pub async fn print_money(&self, amount: Amount) ->
-    // anyhow::Result<(OperationId, OutPoint)> {
-    //     self.print_using_account(amount, fed_key_pair()).await
-    // }
-
-    // /// Use a broken printer in test to print a liability instead of money
-    // /// If the federation is honest, should always fail
-    // pub async fn print_liability(&self, amount: Amount) ->
-    // anyhow::Result<(OperationId, OutPoint)> {
-    //     self.print_using_account(amount, broken_fed_key_pair())
-    //         .await
-    // }
 }
 
+/// The escrow client module initializer
 #[derive(Debug, Clone)]
 pub struct EscrowClientInit;
+
+#[async_trait]
+impl ModuleInit for EscrowClientInit {
+    type Common = EscrowCommonInit;
+    const DATABASE_VERSION: DatabaseVersion = DatabaseVersion(0);
+
+    async fn dump_database(
+        &self,
+        _dbtx: &mut DatabaseTransaction<'_>,
+        _prefix_names: Vec<String>,
+    ) -> Box<dyn Iterator<Item = (String, Box<dyn erased_serde::Serialize + Send>)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
 
 /// Generates the client module
 #[apply(async_trait_maybe_send!)]
@@ -237,13 +643,14 @@ impl ClientModuleInit for EscrowClientInit {
     }
 
     async fn init(&self, args: &ClientModuleInitArgs<Self>) -> anyhow::Result<Self::Module> {
+        let cfg = args.cfg().clone();
         Ok(EscrowClientModule {
-            cfg: args.cfg().clone(),
+            cfg: cfg.clone(),
+            module_api: args.module_api().clone(),
             key: args
                 .module_root_secret()
                 .clone()
                 .to_secp_key(&Secp256k1::new()),
-            notifier: args.notifier().clone(),
             client_ctx: args.context(),
             db: args.db().clone(),
         })

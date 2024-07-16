@@ -1,5 +1,5 @@
 {
-  description = "A custom fedimint module";
+  description = "Fedimint Escrow Module";
 
   inputs = {
     nixpkgs = { url = "github:nixos/nixpkgs/nixos-23.11"; };

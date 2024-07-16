@@ -1,20 +1,24 @@
-use fedimint_client::sm::DynState;
-use fedimint_core::core::ModuleInstanceId;
-use fedimint_core::db::{DatabaseTransaction, DatabaseValue, IDatabaseTransactionOpsCoreTyped};
-use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::module::registry::ModuleDecoderRegistry;
-use fedimint_core::{impl_db_record, Amount};
-use fedimint_escrow_common::Nonce;
-use secp256k1::PublicKey;
-use strum_macros::EnumIter;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use std::time::SystemTime;
 
-// Define the key prefix for the database
+use fedimint_core::db::DatabaseRecord;
+use fedimint_core::encoding::{Decodable, Encodable};
+use fedimint_core::{impl_db_record, Amount};
+use fedimint_escrow_common::EscrowStates;
+use secp256k1::PublicKey;
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
+
+/// The prefix for the database keys
 #[repr(u8)]
-#[derive(Clone, Debug, EnumIter)]
+#[derive(Clone, Debug, EnumIter, Encodable, Decodable)]
 pub enum DbKeyPrefix {
     Escrow = 0x04,
+}
+
+impl DatabaseRecord for DbKeyPrefix {
+    const DB_PREFIX: u8 = 0;
+    type Key = EscrowKey;
+    type Value = EscrowValue;
 }
 
 impl std::fmt::Display for DbKeyPrefix {
@@ -23,22 +27,23 @@ impl std::fmt::Display for DbKeyPrefix {
     }
 }
 
-// Define the key structure using a UUID
+/// The key structure using a random escrow_id
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash)]
 pub struct EscrowKey {
     pub escrow_id: String,
 }
 
-// Define the value structure for the database record
-#[derive(Debug, Serialize, Deserialize)]
+/// The structure for the database record
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct EscrowValue {
-    pub buyer: PublicKey,
-    pub seller: PublicKey,
-    pub arbiter: PublicKey,
+    pub buyer_pubkey: PublicKey,
+    pub seller_pubkey: PublicKey,
+    pub arbiter_pubkey: PublicKey,
     pub amount: Amount,
-    pub code_hash: [u8; 32],
-    pub state: EscrowState,
-    pub created_at: u64,
+    pub secret_code_hash: String,
+    pub max_arbiter_fee: Amount,
+    pub state: EscrowStates,
+    pub created_at: SystemTime,
 }
 
 // Implement database record creation and lookup

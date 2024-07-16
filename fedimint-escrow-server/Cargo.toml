@@ -20,8 +20,8 @@ bitcoin_hashes = "0.14.0"
 erased-serde = { workspace = true }
 futures = { workspace = true }
 fedimint-core = { workspace = true }
+fedimint-client = { workspace = true }
 fedimint-escrow-common = { path = "../fedimint-escrow-common" }
-fedimint-escrow-client = { path = "../fedimint-escrow-client" }
 rand = { workspace = true }
 serde = { workspace = true }
 secp256k1 = { workspace = true }
@@ -31,4 +31,4 @@ thiserror = { workspace = true }
 fedimint-server = { workspace = true }
 tracing = { workspace = true }
 tokio = { version = "1.26.0", features = ["sync"] }
-chrono = "0.4.38"
+sha2 = "0.10.8"

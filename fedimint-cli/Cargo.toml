@@ -12,7 +12,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 fedimint-cli = { workspace = true }
-fedimint-escrow-client = { path = "../fedimint-escrow-client" }
+fedimint-escrow-client = { path = "../fedimint-escrow-client", features = ["cli"] }
 fedimint-core = { workspace = true }
 tokio = { version = "1.25.0", features = ["full", "tracing"] }
 
