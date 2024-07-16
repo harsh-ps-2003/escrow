@@ -4,81 +4,100 @@ The Escrow module of the Fedimint system facilitates secure transactions between
 
 ## CLI Commands
 
-### 1. Escrow
+### 1. Create Escrow
 
-`fedimint-cli escrow [SELLER_PUBLIC_KEY] [ARBITER_PUBLIC_KEY] [COST_OF_PRODUCT] [MAXIMUM_ARBITER_FEE_IN_BASIS_POINTS]`
+`fedimint-cli module escrow create [SELLER_PUBLIC_KEY] [ARBITER_PUBLIC_KEY] [COST] [MAX_ARBITER_FEE_BPS]`
 
-This command initiates an escrow transaction. It requires details about the arbiter, cost of the products, and the maximum arbiter fee in BPs (should be between 10 i.e 0.1% to 1000 i.e 10% of the cost of product).
+This command initiates an escrow transaction. It requires:
+- Seller's public key
+- Arbiter's public key
+- Cost of the product/service
+- Maximum arbiter fee in basis points (100 basis points = 1%, range: 10-1000)
 
-*This command has to be used by Buyer only!*
+*This command is to be used by the Buyer only!*
+*The public keys can be obtained from the `public-key command`*
 
-If the command runs successfully, you will get a `SECRET_CODE` (to be shared with the seller off-band for a successful claim), `ESCROW_ID` (unique identifier for the escrow), and the state of the escrow will be `OPENED`.
+Upon successful execution, you'll receive:
+- `secret-code`: Share this with the seller off-band for a successful claim
+- `escrow-id`: Unique identifier for the escrow
+- `state`: Will be set to "escrow opened!"
 
-### 2. EscrowInfo
+### 2. Get Escrow Info
+
+`fedimint-cli module escrow info [ESCROW_ID]`
 
 Fetches information about a specific escrow transaction using its unique ID.
 
-`fedimint-cli EscrowInfo [ESCROW_ID]`
+### 3. Claim Escrow
 
-### 3. EscrowClaim
+`fedimint-cli module escrow claim [ESCROW_ID] [SECRET_CODE]`
 
-Allows the seller to claim the escrow by providing the escrow ID and a secret code that was shared out of band by the buyer.
+Allows the seller to claim the escrow by providing the escrow ID and the secret code shared by the buyer.
 
-`fedimint-cli EscrowClaim [ESCROW_ID] [SECRET_CODE]`
-
-*This command is only to be used by the Seller!*
+*This command is to be used by the Seller only!*
 
 *You will get an error if the escrow is disputed!*
 
-### 4. EscrowDispute
+### 4. Initiate Dispute
 
-Initiates a dispute for an escrow transaction. This command is used when there is a disagreement between the buyer and the seller (both can start the dispute), and the arbiter needs to intervene.
+`fedimint-cli module escrow dispute [ESCROW_ID]`
 
-`fedimint-cli EscrowDispute [ESCROW_ID]`
+Initiates a dispute for an escrow transaction. This command is used when there's a disagreement between the buyer and the seller.
 
-Once the escrow is disputed, the buyer cannot retreat and the seller cannot claim the escrow! Now the arbiter will decide who gets the ecash.
+*Both buyer and seller can initiate a dispute.*
 
-### 5. EscrowArbiterDecision
+Once disputed, the buyer cannot retreat, and the seller cannot claim the escrow. The arbiter will decide the outcome.
 
-Used by the assigned arbiter to make a decision on an escrow transaction that is in dispute.
+### 5. Arbiter Decision
 
-`fedimint-cli EscrowArbiterDecision [ESCROW_ID] [DECISION] [ARBITER_FEE_IN_BASIS_POINTS]`
+`fedimint-cli module escrow arbiter-decision [ESCROW_ID] [DECISION] [ARBITER_FEE_BPS]`
+
+Used by the assigned arbiter to make a decision on a disputed escrow transaction.
 
 *Can only be used by the Arbiter!*
 
-The decision can either be in the favour of `buyer` or the `seller`, whosoever will get the ecash!
+The decision can be either "buyer" or "seller", determining who receives the funds.
 
+### 6. Buyer Claim
 
-### 6. BuyerClaim
+`fedimint-cli module escrow buyer-claim [ESCROW_ID]`
 
-Used by the buyer to claim the ecash in the escrow when the arbiter decides in favour of buyer.
+Used by the buyer to claim the funds in the escrow when the arbiter decides in favor of the buyer.
 
-`fedimint-cli BuyerClaim [ESCROW_ID]`
+### 7. Seller Claim
 
-### 7. SellerClaim
+`fedimint-cli module escrow seller-claim [ESCROW_ID]`
 
-Used by the seller to claim the ecash in the escrow when the arbiter decides in favour of seller.
+Used by the seller to claim the funds in the escrow when the arbiter decides in favor of the seller.
 
-`fedimint-cli SellerClaim [ESCROW_ID]`
+### 8. Get Public Key
+
+`fedimint-cli module escrow public-key`
+
+Retrieves the public key associated with the escrow module.
+
 
 ## Escrow Module Use Flow
 
 mermaid
 ```mermaid
 graph TD
-    A[Buyer] -->|Creates Escrow| B[Escrow]
-    B --> C[Escrow OPEN]
-    C --> D[SECRET_CODE and ESCROW_ID]
-    D -->|Shares SECRET_CODE with Seller| E[Seller]
-    E -->|Claims Escrow| F[EscrowClaim]
-    F --> G[Escrow gets resolved without Dispute]
-    C -->|Dispute Raised| J[EscrowDispute]
-    J --> K[Escrow DISPUTED]
-    K -->|Arbiter Decision| L[EscrowArbiterDecision]
-    L -->|Decision in favor of Buyer| M[Waiting for the buyer to claim the escrow]
-    L -->|Decision in favor of Seller| N[Waiting for the seller to claim the escrow]
-    M --> O[BuyerClaim]
-    N --> P[SellerClaim]
-    O --> Q[Escrow RESOLVED_WITH_DISPUTE]
-    P --> Q
+    A[Buyer] -->|Create Escrow| B[Escrow Created]
+    B -->|Generate| C[SECRET_CODE and ESCROW_ID]
+    C -->|Share SECRET_CODE off-band| D[Seller]
+    B -->|No Dispute| E[Escrow OPEN]
+    E -->|Seller Claims with SECRET_CODE| F[Claim Escrow]
+    F -->|Successful| G[Escrow RESOLVED]
+    B -->|Dispute Raised| H[Initiate Dispute]
+    H -->|Disputed| I[Escrow DISPUTED]
+    I -->|Arbiter Decides| J[Arbiter Decision]
+    J -->|Favor Buyer| K[Buyer Wins]
+    K -->|Buyer Claims| L[Buyer Claim]
+    L -->|Successful| M[Escrow RESOLVED - Buyer receives funds]
+    J -->|Favor Seller| N[Seller Wins]
+    N -->|Seller Claims| O[Seller Claim]
+    O -->|Successful| P[Escrow RESOLVED - Seller receives funds]
+    M -->|Final State| Q[Escrow Closed]
+    P -->|Final State| Q
+    G -->|Final State| Q
 ```
