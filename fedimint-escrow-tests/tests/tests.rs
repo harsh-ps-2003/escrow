@@ -7,21 +7,22 @@
 // use fedimint_core::db::mem_impl::MemDatabase;
 // use fedimint_core::module::ModuleConsensusVersion;
 // use fedimint_core::{sats, Amount, OutPoint};
-// use fedimint_escrow_client::{EscrowClientInit, EscrowClientModule};
-// use fedimint_escrow_common::config::{EscrowClientConfig, EscrowGenParams};
-// use fedimint_escrow_common::{EscrowInput, EscrowOutput, KIND};
+// use fedimint_escrow_client::{EscrowClientInit, EscrowClientModule,
+// EscrowError}; use fedimint_escrow_common::config::{EscrowClientConfig,
+// EscrowGenParams}; use fedimint_escrow_common::{EscrowInput, EscrowOutput,
+// KIND}; use fedimint_escrow_common::endpoints::EscrowInfo;
 // use fedimint_escrow_server::EscrowInit;
 // use fedimint_testing::fixtures::Fixtures;
 // use secp256k1::Secp256k1;
 
-// fn fixtures() -> Fixtures {
-//     Fixtures::new_primary(EscrowClientInit, EscrowInit,
-// EscrowGenParams::default()) }
-
-// async fn setup_test_env() -> anyhow::Result<(
+// async fn setup_test_env(
+//     initial_amount: Amount,
+//     max_arbiter_fee_bps: u16,
+// ) -> anyhow::Result<(
 //     Client,
 //     Client,
 //     Client,
+//     EscrowClientModule,
 //     EscrowClientModule,
 //     EscrowClientModule,
 //     String,
@@ -31,28 +32,24 @@
 //     let (buyer, seller) = fed.two_clients().await;
 //     let arbiter = fed.new_client().await;
 
-//     // when buyer needs to interact with escrow
 //     let buyer_escrow = buyer.get_first_module::<EscrowClientModule>();
-//     // when seller needs to interact with escrow
 //     let seller_escrow = seller.get_first_module::<EscrowClientModule>();
-//     // when arbiter needs to interact with escrow
 //     let arbiter_escrow = arbiter.get_first_module::<EscrowClientModule>();
 
-//     // Fund the buyer with 1100 sats
-//     buyer.fund(sats(1100)).await?;
+//     buyer.fund(initial_amount).await?;
 
 //     let escrow_id = "escrow_id".to_string();
-//     let secret_code_hash = "secret_code_hash".to_string();
+//     let secret_code = "secret_code".to_string();
+//     let secret_code_hash = hash256(secret_code.clone());
 
-//     // buyer creates escrow
-//     let (operation_id, outpoint) = buyer_escrow
+//     buyer_escrow
 //         .create_escrow(
-//             Amount::sats(1000),
+//             initial_amount,
 //             seller.public_key(),
 //             arbiter.public_key(),
-//             escrow_id,
+//             escrow_id.clone(),
 //             secret_code_hash,
-//             20,
+//             max_arbiter_fee_bps,
 //         )
 //         .await?;
 
@@ -64,188 +61,294 @@
 //         seller_escrow,
 //         arbiter_escrow,
 //         escrow_id,
-//         secret_code_hash,
+//         secret_code,
 //     ))
 // }
 
+// // Implement a mock get_escrow_info for testing
+// impl EscrowClientModule {
+//     async fn mock_get_escrow_info(&self, escrow_id: String) ->
+// anyhow::Result<EscrowInfo> {         // This is a simplified mock
+// implementation. In a real scenario, you'd want to store and retrieve actual
+// escrow data.         Ok(EscrowInfo {
+//             buyer_pubkey: self.key.public_key(),
+//             seller_pubkey: self.key.public_key(), // For simplicity, using
+// the same key             arbiter_pubkey: self.key.public_key(), // For
+// simplicity, using the same key             amount: Amount::sats(1000),
+//             state: "open".to_string(),
+//             max_arbiter_fee_bps: 20,
+//         })
+//     }
+// }
+
 // #[tokio::test(flavor = "multi_thread")]
-// async fn get_module_info_returns_expected() -> anyhow::Result<()> {
-//     let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow,
-// escrow_id) =         setup_test_env().await?;
+// async fn test_create_escrow() -> anyhow::Result<()> {
+//     let (buyer, seller, arbiter, buyer_escrow, _, _, escrow_id, _) =
+// setup_test_env(Amount::sats(1100), 20).await?;
 
-//     // Prepare arguments for the EscrowInfo command
-//     let args = vec![
-//         ffi::OsString::from("EscrowInfo"),
-//         ffi::OsString::from(escrow_id.clone()),
-//     ];
-
-//     // Call the handle_cli_command function from cli.rs
-//     let escrow_value = handle_cli_command(&buyer_escrow, &args).await?;
-
-//     // expected JSON response
-//     let expected_json = json!({
-//         "buyer": buyer.public_key().to_string(),
-//         "seller": seller.public_key().to_string(),
-//         "arbiter": arbiter.public_key().to_string(),
-//         "escrow_id": "escrow_id".to_string(),
-//         "status": "open", // Assuming the status is 'open' initially
-//         "amount": amount,
-//         "secret_code_hash": secret_code_hash,
-//     });
-
-//     // Assert that the response matches the expected JSON
-//     assert_eq!(response, expected_json);
+//     let escrow_info =
+// buyer_escrow.mock_get_escrow_info(escrow_id.clone()).await?;     assert_eq!
+// (escrow_info.buyer_pubkey, buyer.public_key());     assert_eq!(escrow_info.
+// seller_pubkey, seller.public_key());     assert_eq!(escrow_info.
+// arbiter_pubkey, arbiter.public_key());     assert_eq!(escrow_info.amount,
+// Amount::sats(1000));     assert_eq!(escrow_info.state, "open");
+//     assert_eq!(escrow_info.max_arbiter_fee_bps, 20);
 
 //     Ok(())
 // }
 
 // #[tokio::test(flavor = "multi_thread")]
-// async fn can_create_and_claim_escrow_in_happy_state() -> anyhow::Result<()> {
-//     let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow,
-// escrow_id) =         setup_test_env().await?;
+// async fn test_seller_claim_with_correct_secret() -> anyhow::Result<()> {
+//     let (_, _, _, _, seller_escrow, _, escrow_id, secret_code) =
+// setup_test_env(Amount::sats(1100), 20).await?;
 
-//     // Seller claims escrow with secret code
-//     let secret_code: String = "secret_code".to_string();
-//     seller_escrow
-//         .claim_escrow(escrow_id, secret_code, amount)
-//         .await?;
-
-//     // Check balances
-//     assert_eq!(buyer.get_balance().await, Amount::ZERO);
-//     assert_eq!(seller.get_balance().await, sats(1000));
+//     let result = seller_escrow.claim_escrow(escrow_id, secret_code,
+// Amount::sats(1000)).await;     assert!(result.is_ok());
 
 //     Ok(())
 // }
 
 // #[tokio::test(flavor = "multi_thread")]
-// async fn can_dispute_and_resolve_escrow_in_favor_of_buyer() ->
-// anyhow::Result<()> {     let (buyer, seller, arbiter, buyer_escrow,
-// seller_escrow, arbiter_escrow, escrow_id) =         setup_test_env().await?;
+// async fn test_seller_claim_with_incorrect_secret() -> anyhow::Result<()> {
+//     let (_, _, _, _, seller_escrow, _, escrow_id, _) =
+// setup_test_env(Amount::sats(1100), 20).await?;
 
-//     // Buyer disputes escrow
-//     buyer_escrow.initiate_dispute(escrow_id).await?;
-
-//     // Arbiter resolves dispute in favor of buyer
-//     arbiter_escrow.arbiter_decision(escrow_id, "buyer").await?;
-
-//     // Buyer retreats funds but paid arbiter from his pocket
-//     buyer_escrow.buyer_claim(escrow_id, sats(900)).await?;
-
-//     // Check balances
-//     assert_eq!(buyer.get_balance().await, sats(900)); // minus arbiter fee
-//     assert_eq!(seller.get_balance().await, Amount::ZERO);
-//     assert_eq!(arbiter.get_balance().await, sats(100));
-
-//     Ok(())
-// }
-
-// // buyer disputed the escrow but seller won!
-// #[tokio::test(flavor = "multi_thread")]
-// async fn can_dispute_and_resolve_escrow_in_favor_of_seller() ->
-// anyhow::Result<()> {     let (buyer, seller, arbiter, buyer_escrow,
-// seller_escrow, arbiter_escrow, escrow_id) =         setup_test_env().await?;
-
-//     // Buyer disputes escrow
-//     buyer_escrow.initiate_dispute(escrow_id).await?;
-
-//     // Arbiter resolves dispute in favor of buyer
-//     arbiter_escrow.arbiter_decision(escrow_id, "seller").await?;
-
-//     // Seller claims disputed funds
-//     seller_escrow
-//         .claim_escrow(escrow_id, secret_code, sats(900))
-//         .await?;
-
-//     // Check balances
-//     assert_eq!(buyer.get_balance().await, Amount::ZERO); // minus arbiter fee
-//     assert_eq!(seller.get_balance().await, sats(1000));
-//     assert_eq!(arbiter.get_balance().await, sats(100));
+//     let incorrect_secret = "incorrect_secret".to_string();
+//     let result = seller_escrow.claim_escrow(escrow_id, incorrect_secret,
+// Amount::sats(1000)).await;     assert!(matches!(result,
+// Err(EscrowError::InvalidSecretCode)));
 
 //     Ok(())
 // }
 
 // #[tokio::test(flavor = "multi_thread")]
-// async fn invalid_secret_code_fails_claim() -> anyhow::Result<()> {
-//     let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow,
-// escrow_id) =         setup_test_env().await?;
+// async fn test_buyer_initiate_dispute() -> anyhow::Result<()> {
+//     let (_, _, _, buyer_escrow, _, _, escrow_id, _) =
+// setup_test_env(Amount::sats(1100), 20).await?;
 
-//     // Seller tries to claim with invalid secret code
-//     let invalid_code: String = "wrong_secret".to_string();
-//     let res = seller_escrow
-//         .claim_escrow(escrow_id, invalid_code, amount)
-//         .await;
+//     let result = buyer_escrow.initiate_dispute(escrow_id.clone()).await;
+//     assert!(result.is_ok());
 
-//     // Check that it returns InvalidSecretCode error
-//     assert!(matches!(res, Err(EscrowError::InvalidSecretCode)));
-// }
-
-// #[tokio::test(flavor = "multi_thread")]
-// async fn claim_fails_when_disputed() -> anyhow::Result<()> {
-//     let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow,
-// escrow_id) =         setup_test_env().await?;
-
-//     // Buyer disputes escrow
-//     buyer_escrow.initiate_dispute(escrow_id).await?;
-
-//     // Seller tries to claim
-//     let res = seller_escrow
-//         .claim_escrow(escrow_id, secret_code, amount)
-//         .await;
-
-//     // Check it returns EscrowDisputed error
-//     assert!(matches!(res, Err(EscrowError::EscrowDisputed)));
+//     let escrow_info = buyer_escrow.mock_get_escrow_info(escrow_id).await?;
+//     assert_eq!(escrow_info.state, "disputed");
 
 //     Ok(())
 // }
 
 // #[tokio::test(flavor = "multi_thread")]
-// async fn non_arbiter_cannot_resolve() -> anyhow::Result<()> {
-//     let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow,
-// escrow_id) =         setup_test_env().await?;
+// async fn test_arbiter_decision_buyer_wins() -> anyhow::Result<()> {
+//     let (buyer, _, _, buyer_escrow, _, arbiter_escrow, escrow_id, _) =
+// setup_test_env(Amount::sats(1100), 20).await?;
 
-//     // Dispute the escrow
-//     seller_escrow.seller_dispute(escrow_id).await?;
+//     buyer_escrow.initiate_dispute(escrow_id.clone()).await?;
+//     arbiter_escrow.arbiter_decision(escrow_id.clone(), "buyer").await?;
 
-//     // Non-arbiter client tries to resolve
-//     let non_arbiter = fed.new_client().await;
-//     let res = non_arbiter
-//         .get_first_module::<EscrowClientModule>()
-//         .arbiter_resolve(escrow_id, seller.public_key())
-//         .await;
-
-//     // Check it returns ArbiterNotMatched error
-//     assert!(matches!(res, Err(EscrowError::ArbiterNotMatched)));
+//     let escrow_info = buyer_escrow.mock_get_escrow_info(escrow_id).await?;
+//     assert_eq!(escrow_info.state, "resolved_buyer_wins");
 
 //     Ok(())
 // }
 
 // #[tokio::test(flavor = "multi_thread")]
-// async fn cannot_claim_before_arbiter_resolves() -> anyhow::Result<()> {
-//     let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow,
-// escrow_id) =         setup_test_env().await?;
+// async fn test_arbiter_decision_seller_wins() -> anyhow::Result<()> {
+//     let (_, seller, _, buyer_escrow, seller_escrow, arbiter_escrow,
+// escrow_id, _) = setup_test_env(Amount::sats(1100), 20).await?;
 
-//     // Dispute the escrow
-//     seller_escrow.seller_dispute(escrow_id).await?;
+//     buyer_escrow.initiate_dispute(escrow_id.clone()).await?;
+//     arbiter_escrow.arbiter_decision(escrow_id.clone(), "seller").await?;
 
-//     // Buyer tries to claim before arbiter resolves
-//     let res = buyer_escrow.buyer_claim(escrow_id, sats(900)).await;
-
-//     // Check it returns ArbiterNotDecided error
-//     assert!(matches!(res, Err(EscrowError::ArbiterNotDecided)));
+//     let escrow_info = seller_escrow.mock_get_escrow_info(escrow_id).await?;
+//     assert_eq!(escrow_info.state, "resolved_seller_wins");
 
 //     Ok(())
 // }
 
 // #[tokio::test(flavor = "multi_thread")]
-// async fn arbiter_decision_fails_when_not_disputed() -> anyhow::Result<()> {
-//     let (buyer, seller, arbiter, buyer_escrow, seller_escrow, arbiter_escrow,
-// escrow_id) =         setup_test_env().await?;
+// async fn test_buyer_claim_after_winning_dispute() -> anyhow::Result<()> {
+//     let (buyer, _, _, buyer_escrow, _, arbiter_escrow, escrow_id, _) =
+// setup_test_env(Amount::sats(1100), 20).await?;
 
-//     // Attempt to make an arbiter decision when no dispute has been raised
-//     let res = arbiter_escrow.arbiter_decision(escrow_id, "buyer").await;
+//     buyer_escrow.initiate_dispute(escrow_id.clone()).await?;
+//     arbiter_escrow.arbiter_decision(escrow_id.clone(), "buyer").await?;
 
-//     // Check it returns EscrowNotDisputed error
-//     assert!(matches!(res, Err(EscrowError::EscrowNotDisputed)));
+//     let result = buyer_escrow.buyer_claim(escrow_id,
+// Amount::sats(900)).await;     assert!(result.is_ok());
+
+//     assert_eq!(buyer.get_balance().await, Amount::sats(900));
+
+//     Ok(())
+// }
+
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_seller_claim_after_winning_dispute() -> anyhow::Result<()> {
+//     let (_, seller, _, buyer_escrow, seller_escrow, arbiter_escrow,
+// escrow_id, _) = setup_test_env(Amount::sats(1100), 20).await?;
+
+//     buyer_escrow.initiate_dispute(escrow_id.clone()).await?;
+//     arbiter_escrow.arbiter_decision(escrow_id.clone(), "seller").await?;
+
+//     let result = seller_escrow.claim_escrow(escrow_id,
+// "secret_code".to_string(), Amount::sats(900)).await;     assert!(result.
+// is_ok());
+
+//     assert_eq!(seller.get_balance().await, Amount::sats(900));
+
+//     Ok(())
+// }
+
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_cannot_claim_disputed_escrow_before_resolution() ->
+// anyhow::Result<()> {     let (_, _, _, buyer_escrow, seller_escrow, _,
+// escrow_id, _) = setup_test_env(Amount::sats(1100), 20).await?;
+
+//     buyer_escrow.initiate_dispute(escrow_id.clone()).await?;
+
+//     let result = seller_escrow.claim_escrow(escrow_id,
+// "secret_code".to_string(), Amount::sats(1000)).await;     assert!(matches!
+// (result, Err(EscrowError::EscrowDisputed)));
+
+//     Ok(())
+// }
+
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_cannot_dispute_already_disputed_escrow() -> anyhow::Result<()>
+// {     let (_, _, _, buyer_escrow, seller_escrow, _, escrow_id, _) =
+// setup_test_env(Amount::sats(1100), 20).await?;
+
+//     buyer_escrow.initiate_dispute(escrow_id.clone()).await?;
+
+//     let result = seller_escrow.seller_dispute(escrow_id).await;
+//     assert!(matches!(result, Err(EscrowError::EscrowAlreadyDisputed)));
+
+//     Ok(())
+// }
+
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_cannot_make_arbiter_decision_on_undisputed_escrow() ->
+// anyhow::Result<()> {     let (_, _, _, _, _, arbiter_escrow, escrow_id, _) =
+// setup_test_env(Amount::sats(1100), 20).await?;
+
+//     let result = arbiter_escrow.arbiter_decision(escrow_id, "buyer").await;
+//     assert!(matches!(result, Err(EscrowError::EscrowNotDisputed)));
+
+//     Ok(())
+// }
+
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_create_escrow_with_max_arbiter_fee() -> anyhow::Result<()> {
+//     let (buyer, seller, arbiter, buyer_escrow, _, _, escrow_id, _) =
+// setup_test_env(Amount::sats(1100), 20).await?;
+
+//     let escrow_info =
+// buyer_escrow.mock_get_escrow_info(escrow_id.clone()).await?;     assert_eq!
+// (escrow_info.max_arbiter_fee_bps, 20);
+
+//     Ok(())
+// }
+
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_arbiter_decision_with_fee() -> anyhow::Result<()> {
+//     let (buyer, seller, _, buyer_escrow, seller_escrow, arbiter_escrow,
+// escrow_id, _) = setup_test_env(Amount::sats(1100), 20).await?;
+
+//     buyer_escrow.initiate_dispute(escrow_id.clone()).await?;
+//     arbiter_escrow.arbiter_decision(escrow_id.clone(), "seller", 10).await?;
+
+//     let escrow_info =
+// seller_escrow.mock_get_escrow_info(escrow_id.clone()).await?;     assert_eq!
+// (escrow_info.state, "resolved_seller_wins");
+
+//     // Seller should receive 990 sats (1000 - 1% arbiter fee)
+//     seller_escrow.claim_escrow(escrow_id, "secret_code".to_string(),
+// Amount::sats(990)).await?;     assert_eq!(seller.get_balance().await,
+// Amount::sats(990));
+
+//     Ok(())
+// }
+
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_seller_claim() -> anyhow::Result<()> {
+//     let (_, seller, _, _, seller_escrow, _, escrow_id, _) =
+// setup_test_env(Amount::sats(1100), 20).await?;
+
+//     let result = seller_escrow.seller_claim(escrow_id.clone(),
+// Amount::sats(1000)).await;     assert!(result.is_ok());
+
+//     assert_eq!(seller.get_balance().await, Amount::sats(1000));
+
+//     Ok(())
+// }
+
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_public_key() -> anyhow::Result<()> {
+//     let (_, _, _, buyer_escrow, _, _, _, _) =
+// setup_test_env(Amount::sats(1100), 20).await?;
+
+//     let public_key = buyer_escrow.public_key();
+//     assert!(public_key.is_some());
+
+//     Ok(())
+// }
+
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_claim_already_claimed_escrow() -> anyhow::Result<()> {
+//     let (_, _, _, _, seller_escrow, _, escrow_id, _) =
+// setup_test_env(Amount::sats(1100), 20).await?;
+
+//     seller_escrow.claim_escrow(escrow_id.clone(), "secret_code".to_string(),
+// Amount::sats(1000)).await?;
+
+//     let result = seller_escrow.claim_escrow(escrow_id,
+// "secret_code".to_string(), Amount::sats(1000)).await;     assert!(matches!
+// (result, Err(EscrowError::EscrowAlreadyClaimed)));
+
+//     Ok(())
+// }
+
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_multiple_arbiter_decisions() -> anyhow::Result<()> {
+//     let (_, _, _, buyer_escrow, _, arbiter_escrow, escrow_id, _) =
+// setup_test_env(Amount::sats(1100), 20).await?;
+
+//     buyer_escrow.initiate_dispute(escrow_id.clone()).await?;
+//     arbiter_escrow.arbiter_decision(escrow_id.clone(), "buyer", 10).await?;
+
+//     let result = arbiter_escrow.arbiter_decision(escrow_id, "seller",
+// 10).await;     assert!(matches!(result,
+// Err(EscrowError::EscrowAlreadyResolved)));
+
+//     Ok(())
+// }
+
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_create_escrow_with_insufficient_funds() -> anyhow::Result<()> {
+//     let (_, _, _, buyer_escrow, _, _, escrow_id, _) =
+// setup_test_env(Amount::sats(500), 20).await?;
+
+//     let result = buyer_escrow.create_escrow(
+//         Amount::sats(1000),
+//         buyer_escrow.key.public_key(),
+//         buyer_escrow.key.public_key(),
+//         escrow_id,
+//         hash256("secret".to_string()),
+//         20,
+//     ).await;
+
+//     assert!(matches!(result, Err(EscrowError::InsufficientFunds)));
+
+//     Ok(())
+// }
+
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_arbiter_decision_with_excessive_fee() -> anyhow::Result<()> {
+//     let (_, _, _, buyer_escrow, _, arbiter_escrow, escrow_id, _) =
+// setup_test_env(Amount::sats(1100), 20).await?;
+
+//     buyer_escrow.initiate_dispute(escrow_id.clone()).await?;
+//     let result = arbiter_escrow.arbiter_decision(escrow_id,
+// "seller".to_string(), 30).await;
+
+//     assert!(matches!(result, Err(EscrowError::ExcessiveArbiterFee)));
 
 //     Ok(())
 // }
