@@ -79,7 +79,6 @@ Retrieves the public key associated with the escrow module.
 
 ## Escrow Module Use Flow
 
-mermaid
 ```mermaid
 graph TD
     A[Buyer] -->|Create Escrow| B[Escrow Created]

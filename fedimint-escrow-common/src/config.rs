@@ -52,12 +52,15 @@ pub struct EscrowClientConfig {
 }
 
 impl EscrowClientConfig {
-    pub fn limit_max_arbiter_fee_bps(&self) -> Result<u16, anyhow::Error> {
+    pub fn limit_max_arbiter_fee_bps(
+        &self,
+        max_arbiter_fee_bps: u16,
+    ) -> Result<u16, anyhow::Error> {
         // the max_arbiter_fee_bps should be in range 10 (0.1%) to 1000 (10%)
-        if self.max_arbiter_fee_bps < 10 || self.max_arbiter_fee_bps > 1000 {
+        if max_arbiter_fee_bps < 10 || max_arbiter_fee_bps > 1000 {
             Err(anyhow::anyhow!("max_arbiter_fee_bps is out of bounds"))
         } else {
-            Ok(self.max_arbiter_fee_bps)
+            Ok(max_arbiter_fee_bps)
         }
     }
 }
