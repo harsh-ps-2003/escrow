@@ -130,7 +130,7 @@ impl EscrowClientModule {
         let operation_id = OperationId(thread_rng().gen());
 
         // Validate max_arbiter_fee_bps (should be in range 10 to 1000)
-        if let Err(e) = self.cfg.limit_max_arbiter_fee_bps() {
+        if let Err(e) = self.cfg.limit_max_arbiter_fee_bps(max_arbiter_fee_bps) {
             return Err(anyhow::anyhow!("Invalid max_arbiter_fee_bps: {}", e));
         }
 
