@@ -75,7 +75,7 @@ pub(crate) async fn handle_cli_command(
             let secret_code_hash = hash256(secret_code.clone());
 
             // finalize_and_submit txns to lock ecash by underfunding
-            let (_operation_id, _out_point) = escrow
+            escrow
                 .create_escrow(
                     cost,
                     seller_pubkey,

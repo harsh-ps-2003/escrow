@@ -1,10 +1,15 @@
+use std::pin::Pin;
+
+use anyhow::Error;
 use fedimint_client::sm::{Context, DynState, State, StateTransition};
 use fedimint_client::DynGlobalClientContext;
 use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, OperationId};
 use fedimint_core::encoding::{Decodable, Encodable};
+use futures::Future;
+use rand::{thread_rng, Rng};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct EscrowStateMachine {}
+pub struct EscrowStateMachine;
 
 /// Data needed by the state machine as context
 #[derive(Debug, Clone)]
@@ -22,11 +27,15 @@ impl State for EscrowStateMachine {
         _context: &Self::ModuleContext,
         _global_context: &DynGlobalClientContext,
     ) -> Vec<StateTransition<Self>> {
-        vec![]
+        // transition to the same state on the client side
+        vec![StateTransition::new(
+            async { () },
+            |_db_tx, _, old_state: Self| Box::pin(async move { old_state }),
+        )]
     }
 
     fn operation_id(&self) -> OperationId {
-        unreachable!("EscrowStateMachine should never be used")
+        OperationId(thread_rng().gen())
     }
 }
 

@@ -126,7 +126,7 @@ impl EscrowClientModule {
         escrow_id: String,
         secret_code_hash: String,
         max_arbiter_fee_bps: u16,
-    ) -> anyhow::Result<(OperationId, OutPoint)> {
+    ) -> anyhow::Result<()> {
         let operation_id = OperationId(thread_rng().gen());
 
         // Validate max_arbiter_fee_bps (should be in range 10 to 1000)
@@ -187,7 +187,7 @@ impl EscrowClientModule {
             }
         }
 
-        Ok((operation_id, change[0]))
+        Ok(())
     }
 
     /// Handles the seller transaction to claim the funds that are locked in the
