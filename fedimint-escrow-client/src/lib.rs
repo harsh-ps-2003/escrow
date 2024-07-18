@@ -154,9 +154,14 @@ impl EscrowClientModule {
             max_arbiter_fee,
         };
 
+        let operation_id_clone = operation_id.clone();
         let client_output = ClientOutput {
             output,
-            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
+            state_machines: Arc::new(move |_: TransactionId, _: u64| {
+                vec![EscrowStateMachine {
+                    operation_id: operation_id_clone,
+                }]
+            }),
         };
 
         // Build and send tx to the fed by underfunding the transaction
@@ -234,10 +239,15 @@ impl EscrowClientModule {
             signature: signature,
         });
 
+        let operation_id_clone = operation_id.clone();
         let client_input = ClientInput {
             input,
             keys: vec![],
-            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
+            state_machines: Arc::new(move |_: TransactionId, _: u64| {
+                vec![EscrowStateMachine {
+                    operation_id: operation_id_clone,
+                }]
+            }),
         };
 
         // Build and send tx to the fed
@@ -308,10 +318,15 @@ impl EscrowClientModule {
             signature: signature,
         });
 
+        let operation_id_clone = operation_id.clone();
         let client_input = ClientInput {
             input,
             keys: vec![],
-            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
+            state_machines: Arc::new(move |_: TransactionId, _: u64| {
+                vec![EscrowStateMachine {
+                    operation_id: operation_id_clone,
+                }]
+            }),
         };
 
         // Build and send tx to the fed
@@ -381,10 +396,15 @@ impl EscrowClientModule {
             signature: signature,
         });
 
+        let operation_id_clone = operation_id.clone();
         let client_input = ClientInput {
             input,
             keys: vec![],
-            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
+            state_machines: Arc::new(move |_: TransactionId, _: u64| {
+                vec![EscrowStateMachine {
+                    operation_id: operation_id_clone,
+                }]
+            }),
         };
 
         // Build and send tx to the fed
@@ -439,10 +459,15 @@ impl EscrowClientModule {
             signature: signature,
         });
 
+        let operation_id_clone = operation_id.clone();
         let client_input = ClientInput {
             input,
             keys: vec![],
-            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
+            state_machines: Arc::new(move |_: TransactionId, _: u64| {
+                vec![EscrowStateMachine {
+                    operation_id: operation_id_clone,
+                }]
+            }),
         };
 
         // Build and send tx to the fed
@@ -521,10 +546,15 @@ impl EscrowClientModule {
             signature: signature,
         });
 
+        let operation_id_clone = operation_id.clone();
         let client_input = ClientInput {
             input,
             keys: vec![],
-            state_machines: Arc::new(|_: TransactionId, _: u64| vec![EscrowStateMachine {}]),
+            state_machines: Arc::new(move |_: TransactionId, _: u64| {
+                vec![EscrowStateMachine {
+                    operation_id: operation_id_clone,
+                }]
+            }),
         };
 
         // Build and send tx to the fed

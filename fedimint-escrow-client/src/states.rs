@@ -9,7 +9,9 @@ use futures::Future;
 use rand::{thread_rng, Rng};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct EscrowStateMachine;
+pub struct EscrowStateMachine {
+    pub operation_id: OperationId,
+}
 
 /// Data needed by the state machine as context
 #[derive(Debug, Clone)]
@@ -35,7 +37,7 @@ impl State for EscrowStateMachine {
     }
 
     fn operation_id(&self) -> OperationId {
-        OperationId(thread_rng().gen())
+        self.operation_id.clone()
     }
 }
 
