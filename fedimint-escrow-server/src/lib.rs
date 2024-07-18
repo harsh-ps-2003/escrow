@@ -31,7 +31,7 @@ use fedimint_escrow_common::endpoints::{EscrowInfo, GET_MODULE_INFO};
 use fedimint_escrow_common::{
     hash256, ArbiterDecision, Disputer, EscrowCommonInit, EscrowConsensusItem, EscrowInput,
     EscrowInputError, EscrowModuleTypes, EscrowOutput, EscrowOutputError, EscrowOutputOutcome,
-    EscrowStates, CONSENSUS_VERSION,
+    EscrowStates, MODULE_CONSENSUS_VERSION,
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
 use futures::StreamExt;
@@ -83,13 +83,16 @@ impl ServerModuleInit for EscrowInit {
 
     /// Returns the version of this module
     fn versions(&self, _core: CoreConsensusVersion) -> &[ModuleConsensusVersion] {
-        &[CONSENSUS_VERSION]
+        &[MODULE_CONSENSUS_VERSION]
     }
 
     fn supported_api_versions(&self) -> SupportedModuleApiVersions {
         SupportedModuleApiVersions::from_raw(
             (CORE_CONSENSUS_VERSION.major, CORE_CONSENSUS_VERSION.minor),
-            (CONSENSUS_VERSION.major, CONSENSUS_VERSION.minor),
+            (
+                MODULE_CONSENSUS_VERSION.major,
+                MODULE_CONSENSUS_VERSION.minor,
+            ),
             &[(0, 0)],
         )
     }
