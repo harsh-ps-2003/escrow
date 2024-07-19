@@ -95,6 +95,7 @@ pub struct EscrowInputClamingWithoutDispute {
 /// escrow
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct EscrowInputDisputing {
+    pub amount: Amount,
     pub escrow_id: String,
     pub disputer: PublicKey,
     pub hashed_message: [u8; 32],

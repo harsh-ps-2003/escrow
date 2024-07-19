@@ -90,7 +90,10 @@ impl ClientModule for EscrowClientModule {
                 amount: input.amount,
                 fee: Amount::ZERO,
             }),
-            EscrowInput::Disputing(_) => None, // Disputing doesn't involve an amount
+            EscrowInput::Disputing(input) => Some(TransactionItemAmount {
+                amount: input.amount,
+                fee: Amount::ZERO,
+            }),
         }
     }
 
@@ -170,14 +173,14 @@ impl EscrowClientModule {
         let tx = TransactionBuilder::new()
             .with_output(self.client_ctx.make_client_output(client_output));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (txid, change) = self
+        let (txid, _change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
         // Subscribe to transaction updates
         let mut updates = self
-            .subscribe_transactions_output(operation_id, txid, change.clone())
+            .subscribe_transactions_input(operation_id, txid)
             .await
             .unwrap()
             .into_stream();
@@ -256,14 +259,14 @@ impl EscrowClientModule {
         let tx =
             TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (txid, _change) = self
+        let (txid, change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
         // Subscribe to transaction updates
         let mut updates = self
-            .subscribe_transactions_input(operation_id, txid)
+            .subscribe_transactions_output(operation_id, txid, change.clone())
             .await
             .unwrap()
             .into_stream();
@@ -335,14 +338,14 @@ impl EscrowClientModule {
         let tx =
             TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (txid, _change) = self
+        let (txid, change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
         // Subscribe to transaction updates
         let mut updates = self
-            .subscribe_transactions_input(operation_id, txid)
+            .subscribe_transactions_output(operation_id, txid, change.clone())
             .await
             .unwrap()
             .into_stream();
@@ -413,14 +416,14 @@ impl EscrowClientModule {
         let tx =
             TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (txid, _change) = self
+        let (txid, change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
         // Subscribe to transaction updates
         let mut updates = self
-            .subscribe_transactions_input(operation_id, txid)
+            .subscribe_transactions_output(operation_id, txid, change.clone())
             .await
             .unwrap()
             .into_stream();
@@ -453,6 +456,7 @@ impl EscrowClientModule {
         let signature = secp.sign_schnorr(&message, &self.key);
 
         let input = EscrowInput::Disputing(EscrowInputDisputing {
+            amount: Amount::ZERO,
             escrow_id: escrow_id,
             disputer: self.key.public_key(),
             hashed_message: hashed_message,
@@ -476,14 +480,14 @@ impl EscrowClientModule {
         let tx =
             TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (txid, _change) = self
+        let (txid, change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
         // Subscribe to transaction updates
         let mut updates = self
-            .subscribe_transactions_input(operation_id, txid)
+            .subscribe_transactions_output(operation_id, txid, change.clone())
             .await
             .unwrap()
             .into_stream();
@@ -563,14 +567,14 @@ impl EscrowClientModule {
         let tx =
             TransactionBuilder::new().with_input(self.client_ctx.make_client_input(client_input));
         let outpoint = |txid, _| OutPoint { txid, out_idx: 0 };
-        let (txid, _change) = self
+        let (txid, change) = self
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
 
         // Subscribe to transaction updates
         let mut updates = self
-            .subscribe_transactions_input(operation_id, txid)
+            .subscribe_transactions_output(operation_id, txid, change.clone())
             .await
             .unwrap()
             .into_stream();
