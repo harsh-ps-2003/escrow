@@ -16,11 +16,18 @@ where
 {
     // gets the escrow info from the federation api
     async fn get_escrow_info(&self, escrow_id: String) -> anyhow::Result<EscrowInfo> {
-        self.request_current_consensus(
-            GET_MODULE_INFO.to_string(),
-            ApiRequestErased::new(escrow_id),
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("Federation API error: {}", e))
+        let result = self
+            .request_current_consensus(
+                GET_MODULE_INFO.to_string(),
+                ApiRequestErased::new(escrow_id),
+            )
+            .await;
+        match result {
+            Ok(info) => {
+                tracing::info!("Received escrow info: {:?}", info);
+                Ok(info)
+            }
+            Err(e) => Err(anyhow::anyhow!("Federation API error: {}", e)),
+        }
     }
 }

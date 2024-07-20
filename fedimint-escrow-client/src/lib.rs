@@ -91,7 +91,7 @@ impl ClientModule for EscrowClientModule {
                 fee: Amount::ZERO,
             }),
             EscrowInput::Disputing(input) => Some(TransactionItemAmount {
-                amount: input.amount,
+                amount: Amount::ZERO,
                 fee: Amount::ZERO,
             }),
         }
@@ -245,7 +245,7 @@ impl EscrowClientModule {
         let operation_id_clone = operation_id.clone();
         let client_input = ClientInput {
             input,
-            keys: vec![],
+            keys: vec![self.key.clone()],
             state_machines: Arc::new(move |_: TransactionId, _: u64| {
                 vec![EscrowStateMachine {
                     operation_id: operation_id_clone,
@@ -324,7 +324,7 @@ impl EscrowClientModule {
         let operation_id_clone = operation_id.clone();
         let client_input = ClientInput {
             input,
-            keys: vec![],
+            keys: vec![self.key.clone()],
             state_machines: Arc::new(move |_: TransactionId, _: u64| {
                 vec![EscrowStateMachine {
                     operation_id: operation_id_clone,
@@ -402,7 +402,7 @@ impl EscrowClientModule {
         let operation_id_clone = operation_id.clone();
         let client_input = ClientInput {
             input,
-            keys: vec![],
+            keys: vec![self.key.clone()],
             state_machines: Arc::new(move |_: TransactionId, _: u64| {
                 vec![EscrowStateMachine {
                     operation_id: operation_id_clone,
@@ -456,7 +456,6 @@ impl EscrowClientModule {
         let signature = secp.sign_schnorr(&message, &self.key);
 
         let input = EscrowInput::Disputing(EscrowInputDisputing {
-            amount: Amount::ZERO,
             escrow_id: escrow_id,
             disputer: self.key.public_key(),
             hashed_message: hashed_message,
@@ -466,7 +465,7 @@ impl EscrowClientModule {
         let operation_id_clone = operation_id.clone();
         let client_input = ClientInput {
             input,
-            keys: vec![],
+            keys: vec![self.key.clone()],
             state_machines: Arc::new(move |_: TransactionId, _: u64| {
                 vec![EscrowStateMachine {
                     operation_id: operation_id_clone,
@@ -484,7 +483,6 @@ impl EscrowClientModule {
             .client_ctx
             .finalize_and_submit_transaction(operation_id, KIND.as_str(), outpoint, tx)
             .await?;
-
         // Subscribe to transaction updates
         let mut updates = self
             .subscribe_transactions_output(operation_id, txid, change.clone())
@@ -553,7 +551,7 @@ impl EscrowClientModule {
         let operation_id_clone = operation_id.clone();
         let client_input = ClientInput {
             input,
-            keys: vec![],
+            keys: vec![self.key.clone()],
             state_machines: Arc::new(move |_: TransactionId, _: u64| {
                 vec![EscrowStateMachine {
                     operation_id: operation_id_clone,
@@ -608,7 +606,8 @@ impl EscrowClientModule {
                 Ok(()) => {
                     yield EscrowOperationState::Accepted;
                 },
-                Err(_) => {
+                Err(e) => {
+                    tracing::info!("Transaction rejected: {:?}", e);
                     yield EscrowOperationState::Rejected;
                 }
             }
@@ -640,7 +639,8 @@ impl EscrowClientModule {
                         Err(_) => yield EscrowOperationState::Rejected,
                     }
                 },
-                Err(_) => {
+                Err(e) => {
+                    tracing::info!("Transaction rejected: {:?}", e);
                     yield EscrowOperationState::Rejected;
                 }
             }

@@ -29,13 +29,13 @@ use fedimint_escrow_common::config::{
 };
 use fedimint_escrow_common::endpoints::{EscrowInfo, GET_MODULE_INFO};
 use fedimint_escrow_common::{
-    hash256, ArbiterDecision, Disputer, EscrowCommonInit, EscrowConsensusItem, EscrowInput,
-    EscrowInputError, EscrowModuleTypes, EscrowOutput, EscrowOutputError, EscrowOutputOutcome,
-    EscrowStates, MODULE_CONSENSUS_VERSION,
+    hash256, ArbiterDecision, Disputer, EscrowCommonInit, EscrowConsensusItem, EscrowError,
+    EscrowInput, EscrowInputError, EscrowModuleTypes, EscrowOutput, EscrowOutputError,
+    EscrowOutputOutcome, EscrowStates, MODULE_CONSENSUS_VERSION,
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
 use futures::StreamExt;
-use secp256k1::{Message, Secp256k1, XOnlyPublicKey};
+use secp256k1::{Message, Secp256k1};
 use strum::IntoEnumIterator;
 
 /// Generates the module
@@ -200,6 +200,7 @@ impl ServerModule for Escrow {
         dbtx: &mut DatabaseTransaction<'c>,
         input: &'b EscrowInput,
     ) -> Result<InputMeta, EscrowInputError> {
+        tracing::info!("Processing input: {:?}", input);
         match input {
             EscrowInput::ClamingWithoutDispute(escrow_input) => {
                 let mut escrow_value = self
@@ -209,8 +210,7 @@ impl ServerModule for Escrow {
                 // check the signature of seller
                 let secp = Secp256k1::new();
                 let message = Message::from_slice(&escrow_input.hashed_message).expect("32 bytes");
-                let xonly_pubkey =
-                    XOnlyPublicKey::from_slice(&escrow_value.seller_pubkey.serialize())?;
+                let (xonly_pubkey, _parity) = escrow_value.seller_pubkey.x_only_public_key();
 
                 if !secp
                     .verify_schnorr(&escrow_input.signature, &message, &xonly_pubkey)
@@ -256,10 +256,12 @@ impl ServerModule for Escrow {
                 let message = Message::from_slice(&escrow_input.hashed_message).expect("32 bytes");
                 let xonly_pubkey = match disputer {
                     Disputer::Buyer => {
-                        XOnlyPublicKey::from_slice(&escrow_value.buyer_pubkey.serialize())?
+                        let (xonly, _parity) = escrow_value.buyer_pubkey.x_only_public_key();
+                        xonly
                     }
                     Disputer::Seller => {
-                        XOnlyPublicKey::from_slice(&escrow_value.seller_pubkey.serialize())?
+                        let (xonly, _parity) = escrow_value.seller_pubkey.x_only_public_key();
+                        xonly
                     }
                 };
 
@@ -307,8 +309,7 @@ impl ServerModule for Escrow {
                 // check the signature of arbiter
                 let secp = Secp256k1::new();
                 let message = Message::from_slice(&escrow_input.hashed_message).expect("32 bytes");
-                let xonly_pubkey =
-                    XOnlyPublicKey::from_slice(&escrow_value.arbiter_pubkey.serialize())?;
+                let (xonly_pubkey, _parity) = escrow_value.arbiter_pubkey.x_only_public_key();
 
                 if !secp
                     .verify_schnorr(&escrow_input.signature, &message, &xonly_pubkey)
@@ -357,8 +358,7 @@ impl ServerModule for Escrow {
                         let secp = Secp256k1::new();
                         let message =
                             Message::from_slice(&escrow_input.hashed_message).expect("32 bytes");
-                        let xonly_pubkey =
-                            XOnlyPublicKey::from_slice(&escrow_value.buyer_pubkey.serialize())?;
+                        let (xonly_pubkey, _parity) = escrow_value.buyer_pubkey.x_only_public_key();
 
                         if !secp
                             .verify_schnorr(&escrow_input.signature, &message, &xonly_pubkey)
@@ -385,8 +385,8 @@ impl ServerModule for Escrow {
                         let secp = Secp256k1::new();
                         let message =
                             Message::from_slice(&escrow_input.hashed_message).expect("32 bytes");
-                        let xonly_pubkey =
-                            XOnlyPublicKey::from_slice(&escrow_value.seller_pubkey.serialize())?;
+                        let (xonly_pubkey, _parity) =
+                            escrow_value.seller_pubkey.x_only_public_key();
 
                         if !secp
                             .verify_schnorr(&escrow_input.signature, &message, &xonly_pubkey)
@@ -483,8 +483,9 @@ impl ServerModule for Escrow {
         vec![api_endpoint! {
             GET_MODULE_INFO,
             ApiVersion::new(0, 0),
-            async |module: &Escrow, context, escrow_id: String| -> EscrowInfo {
-                module.handle_get_module_info(&mut context.dbtx().into_nc(), escrow_id).await
+            async |module: &Escrow, context, escrow_id: String| -> Result<EscrowInfo, EscrowError> {
+                tracing::info!("GET_MODULE_INFO called");
+                Ok(module.handle_get_module_info(&mut context.dbtx().into_nc(), escrow_id).await)
             }
         }]
     }
@@ -500,12 +501,12 @@ impl Escrow {
         &self,
         dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
         escrow_id: String,
-    ) -> Result<EscrowInfo, ApiError> {
+    ) -> Result<EscrowInfo, EscrowError> {
         let escrow_value: EscrowValue = dbtx
             .get_value(&EscrowKey { escrow_id })
             .await
-            .ok_or_else(|| ApiError::not_found("Escrow not found".to_string()))?;
-        Ok(EscrowInfo {
+            .ok_or_else(|| EscrowError::EscrowNotFound)?;
+        let escrow_info = EscrowInfo {
             buyer_pubkey: escrow_value.buyer_pubkey,
             seller_pubkey: escrow_value.seller_pubkey,
             arbiter_pubkey: escrow_value.arbiter_pubkey,
@@ -514,7 +515,8 @@ impl Escrow {
             state: escrow_value.state,
             max_arbiter_fee: escrow_value.max_arbiter_fee,
             created_at: escrow_value.created_at,
-        })
+        };
+        Ok(escrow_info)
     }
 
     // get the escrow value from the database using the escrow id

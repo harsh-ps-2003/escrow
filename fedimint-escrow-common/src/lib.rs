@@ -95,7 +95,6 @@ pub struct EscrowInputClamingWithoutDispute {
 /// escrow
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct EscrowInputDisputing {
-    pub amount: Amount,
     pub escrow_id: String,
     pub disputer: PublicKey,
     pub hashed_message: [u8; 32],
@@ -176,7 +175,9 @@ pub enum EscrowInputError {
 pub enum EscrowOutputError {}
 
 /// The errors for the escrow module in client side
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
+#[derive(
+    Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable, Serialize, Deserialize,
+)]
 pub enum EscrowError {
     #[error("Escrow is disputed and cannot be claimed")]
     EscrowDisputed,
