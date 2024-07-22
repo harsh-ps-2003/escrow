@@ -488,9 +488,8 @@ impl ServerModule for Escrow {
         vec![api_endpoint! {
             GET_MODULE_INFO,
             ApiVersion::new(0, 0),
-            async |module: &Escrow, context, escrow_id: String| -> Result<EscrowInfo, EscrowError> {
-                tracing::info!("GET_MODULE_INFO called");
-                Ok(module.handle_get_module_info(&mut context.dbtx().into_nc(), escrow_id).await)
+            async |module: &Escrow, context, escrow_id: String| -> EscrowInfo {
+                module.handle_get_module_info(&mut context.dbtx().into_nc(), escrow_id).await
             }
         }]
     }
@@ -506,11 +505,11 @@ impl Escrow {
         &self,
         dbtx: &mut DatabaseTransaction<'_, NonCommittable>,
         escrow_id: String,
-    ) -> Result<EscrowInfo, EscrowError> {
+    ) -> Result<EscrowInfo, ApiError> {
         let escrow_value: EscrowValue = dbtx
             .get_value(&EscrowKey { escrow_id })
             .await
-            .ok_or_else(|| EscrowError::EscrowNotFound)?;
+            .ok_or_else(|| ApiError::not_found("Escrow not found".to_owned()))?;
         let escrow_info = EscrowInfo {
             buyer_pubkey: escrow_value.buyer_pubkey,
             seller_pubkey: escrow_value.seller_pubkey,
