@@ -1,5 +1,3 @@
-use std::time::SystemTime;
-
 use fedimint_core::Amount;
 use secp256k1::PublicKey;
 use serde::{Deserialize, Serialize};
@@ -19,5 +17,4 @@ pub struct EscrowInfo {
     pub secret_code_hash: String,
     pub state: EscrowStates,
     pub max_arbiter_fee: Amount,
-    pub created_at: SystemTime,
 }

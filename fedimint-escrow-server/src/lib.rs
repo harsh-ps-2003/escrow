@@ -1,7 +1,6 @@
 mod db;
 
 use std::collections::BTreeMap;
-use std::time::SystemTime;
 
 use anyhow::bail;
 use async_trait::async_trait;
@@ -420,6 +419,13 @@ impl ServerModule for Escrow {
         output: &'a EscrowOutput,
         _out_point: OutPoint,
     ) -> Result<TransactionItemAmount, EscrowOutputError> {
+        if self
+            .get_escrow_value(dbtx, output.escrow_id.clone())
+            .await
+            .is_ok()
+        {
+            return Err(EscrowOutputError::EscrowAlreadyExists);
+        }
         let escrow_key = EscrowKey {
             escrow_id: output.escrow_id.clone(),
         };
@@ -431,7 +437,6 @@ impl ServerModule for Escrow {
             secret_code_hash: output.secret_code_hash.clone(),
             max_arbiter_fee: output.max_arbiter_fee,
             state: EscrowStates::Open,
-            created_at: SystemTime::now(), // set the timestamp for escrow creation
         };
 
         // guardian db entry
@@ -514,7 +519,6 @@ impl Escrow {
             secret_code_hash: escrow_value.secret_code_hash,
             state: escrow_value.state,
             max_arbiter_fee: escrow_value.max_arbiter_fee,
-            created_at: escrow_value.created_at,
         };
         Ok(escrow_info)
     }

@@ -1,5 +1,3 @@
-use std::time::SystemTime;
-
 use fedimint_core::db::DatabaseRecord;
 use fedimint_core::encoding::{Decodable, Encodable};
 use fedimint_core::{impl_db_record, Amount};
@@ -43,7 +41,6 @@ pub struct EscrowValue {
     pub secret_code_hash: String,
     pub max_arbiter_fee: Amount,
     pub state: EscrowStates,
-    pub created_at: SystemTime,
 }
 
 // Implement database record creation and lookup

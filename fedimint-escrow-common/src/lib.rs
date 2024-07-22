@@ -172,7 +172,10 @@ pub enum EscrowInputError {
 
 /// Errors that might be returned by the server
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
-pub enum EscrowOutputError {}
+pub enum EscrowOutputError {
+    #[error("Escrow already exists")]
+    EscrowAlreadyExists,
+}
 
 /// The errors for the escrow module in client side
 #[derive(
