@@ -87,19 +87,19 @@ graph TD
     A[Buyer] -->|Create Escrow with max_arbiter_fee_bps| B[Escrow Created]
     B -->|Generate| C[SECRET_CODE and ESCROW_ID]
     C -->|Share SECRET_CODE off-band| D[Seller]
-    B -->|No Dispute| E[Escrow OPEN]
+    C -->|No Dispute| E[Escrow OPEN]
+    C -->|Dispute Raised| H[Initiate Dispute]
     E -->|Seller Claims with SECRET_CODE| F[Claim Escrow]
     F -->|Successful| G[Escrow RESOLVED]
-    B -->|Dispute Raised| H[Initiate Dispute]
     H -->|Disputed| I[Escrow DISPUTED]
     I -->|Arbiter Decides with arbiter_fee_bps| J[Arbiter Decision]
     J -->|Favor Buyer| K[Buyer Wins]
+    J -->|Favor Seller| N[Seller Wins]
     K -->|Buyer Claims| L[Buyer Claim]
     L -->|Successful| M[Escrow RESOLVED - Buyer receives funds]
-    J -->|Favor Seller| N[Seller Wins]
     N -->|Seller Claims| O[Seller Claim]
     O -->|Successful| P[Escrow RESOLVED - Seller receives funds]
-    M -->|Final State| Q[Escrow Closed]
+    G -->|Final State| Q[Escrow Closed]
+    M -->|Final State| Q
     P -->|Final State| Q
-    G -->|Final State| Q
 ```
