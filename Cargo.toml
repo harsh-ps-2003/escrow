@@ -5,7 +5,6 @@ members = [
     "fedimint-escrow-common",
     "fedimint-escrow-client",
     "fedimint-escrow-server",
-    "fedimint-escrow-tests",
     "tests",
 ]
 resolver = "2"

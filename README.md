@@ -84,13 +84,12 @@ Retrieves the public key associated with the escrow module.
 
 ```mermaid
 graph TD
-    A[Buyer] -->|Create Escrow with max_arbiter_fee_bps| B[Escrow Created]
+    A[Buyer] -->|Create Escrow with max_arbiter_fee_bps| B[Escrow OPEN]
     B -->|Generate| C[SECRET_CODE and ESCROW_ID]
     C -->|Share SECRET_CODE off-band| D[Seller]
-    C -->|No Dispute| E[Escrow OPEN]
+    D -->|No Dispute| E[Seller Claims with SECRET_CODE]
     C -->|Dispute Raised| H[Initiate Dispute]
-    E -->|Seller Claims with SECRET_CODE| F[Claim Escrow]
-    F -->|Successful| G[Escrow RESOLVED]
+    E -->|Successful| G[Escrow RESOLVED]
     H -->|Disputed| I[Escrow DISPUTED]
     I -->|Arbiter Decides with arbiter_fee_bps| J[Arbiter Decision]
     J -->|Favor Buyer| K[Buyer Wins]
@@ -99,7 +98,4 @@ graph TD
     L -->|Successful| M[Escrow RESOLVED - Buyer receives funds]
     N -->|Seller Claims| O[Seller Claim]
     O -->|Successful| P[Escrow RESOLVED - Seller receives funds]
-    G -->|Final State| Q[Escrow Closed]
-    M -->|Final State| Q
-    P -->|Final State| Q
 ```

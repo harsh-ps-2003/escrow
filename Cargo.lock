@@ -1711,26 +1711,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fedimint-escrow-tests"
-version = "0.2.1"
-dependencies = [
- "anyhow",
- "fedimint-client",
- "fedimint-core",
- "fedimint-escrow-client",
- "fedimint-escrow-common",
- "fedimint-escrow-server",
- "fedimint-logging",
- "fedimint-server",
- "fedimint-testing",
- "rand",
- "secp256k1 0.24.3",
- "threshold_crypto",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "fedimint-hkdf"
 version = "0.3.0"
 source = "git+https://github.com/fedimint/fedimint?tag=v0.3.0#a41e3a7e31ce0f26058206a04f1cd49ef2b12fe3"
