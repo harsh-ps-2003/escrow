@@ -1,12 +1,7 @@
-use std::pin::Pin;
-
-use anyhow::Error;
 use fedimint_client::sm::{Context, DynState, State, StateTransition};
 use fedimint_client::DynGlobalClientContext;
 use fedimint_core::core::{Decoder, IntoDynInstance, ModuleInstanceId, OperationId};
 use fedimint_core::encoding::{Decodable, Encodable};
-use futures::Future;
-use rand::{thread_rng, Rng};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct EscrowStateMachine {

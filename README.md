@@ -16,6 +16,7 @@ This command initiates an escrow transaction. It requires:
 
 *This command is to be used by the Buyer only!*
 *The public keys can be obtained from the `public-key command`*
+*The `arbiter_max_fee_bps` should be in between 10 (0.1%) and 1000 (10%)*
 
 Upon successful execution, you'll receive:
 - `secret-code`: Share this with the seller off-band for a successful claim
@@ -27,6 +28,8 @@ Upon successful execution, you'll receive:
 `fedimint-cli module escrow info [ESCROW_ID]`
 
 Fetches information about a specific escrow transaction using its unique ID.
+
+*Can be used by buyer, seller and the arbiter!*
 
 ### 3. Claim Escrow
 
@@ -46,7 +49,7 @@ Initiates a dispute for an escrow transaction. This command is used when there's
 
 *Both buyer and seller can initiate a dispute.*
 
-Once disputed, the buyer cannot retreat, and the seller cannot claim the escrow. The arbiter will decide the outcome.
+Once disputed, and the seller cannot claim the escrow using `secret-code`. The arbiter will decide the outcome, and then the winner will be able to claim the escrow contract.
 
 ### 5. Arbiter Decision
 
@@ -81,7 +84,7 @@ Retrieves the public key associated with the escrow module.
 
 ```mermaid
 graph TD
-    A[Buyer] -->|Create Escrow| B[Escrow Created]
+    A[Buyer] -->|Create Escrow with max_arbiter_fee_bps| B[Escrow Created]
     B -->|Generate| C[SECRET_CODE and ESCROW_ID]
     C -->|Share SECRET_CODE off-band| D[Seller]
     B -->|No Dispute| E[Escrow OPEN]
@@ -89,7 +92,7 @@ graph TD
     F -->|Successful| G[Escrow RESOLVED]
     B -->|Dispute Raised| H[Initiate Dispute]
     H -->|Disputed| I[Escrow DISPUTED]
-    I -->|Arbiter Decides| J[Arbiter Decision]
+    I -->|Arbiter Decides with arbiter_fee_bps| J[Arbiter Decision]
     J -->|Favor Buyer| K[Buyer Wins]
     K -->|Buyer Claims| L[Buyer Claim]
     L -->|Successful| M[Escrow RESOLVED - Buyer receives funds]

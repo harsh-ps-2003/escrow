@@ -28,9 +28,9 @@ use fedimint_escrow_common::config::{
 };
 use fedimint_escrow_common::endpoints::{EscrowInfo, GET_MODULE_INFO};
 use fedimint_escrow_common::{
-    hash256, ArbiterDecision, Disputer, EscrowCommonInit, EscrowConsensusItem, EscrowError,
-    EscrowInput, EscrowInputError, EscrowModuleTypes, EscrowOutput, EscrowOutputError,
-    EscrowOutputOutcome, EscrowStates, MODULE_CONSENSUS_VERSION,
+    hash256, ArbiterDecision, Disputer, EscrowCommonInit, EscrowConsensusItem, EscrowInput,
+    EscrowInputError, EscrowModuleTypes, EscrowOutput, EscrowOutputError, EscrowOutputOutcome,
+    EscrowStates, MODULE_CONSENSUS_VERSION,
 };
 use fedimint_server::config::CORE_CONSENSUS_VERSION;
 use futures::StreamExt;

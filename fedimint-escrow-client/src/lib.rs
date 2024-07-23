@@ -90,7 +90,7 @@ impl ClientModule for EscrowClientModule {
                 amount: input.amount,
                 fee: Amount::ZERO,
             }),
-            EscrowInput::Disputing(input) => Some(TransactionItemAmount {
+            EscrowInput::Disputing(_) => Some(TransactionItemAmount {
                 amount: Amount::ZERO,
                 fee: Amount::ZERO,
             }),
