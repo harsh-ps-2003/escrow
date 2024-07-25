@@ -23,10 +23,7 @@ where
             )
             .await;
         match result {
-            Ok(info) => {
-                tracing::info!("Received escrow info: {:?}", info);
-                Ok(info)
-            }
+            Ok(info) => Ok(info),
             Err(e) => Err(anyhow::anyhow!("Federation API error: {}", e)),
         }
     }

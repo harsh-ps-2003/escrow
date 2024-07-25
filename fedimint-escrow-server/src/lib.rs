@@ -199,7 +199,6 @@ impl ServerModule for Escrow {
         dbtx: &mut DatabaseTransaction<'c>,
         input: &'b EscrowInput,
     ) -> Result<InputMeta, EscrowInputError> {
-        tracing::info!("Processing input: {:?}", input);
         match input {
             EscrowInput::ClamingWithoutDispute(escrow_input) => {
                 let mut escrow_value = self
