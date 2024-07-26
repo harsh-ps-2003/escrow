@@ -1,7 +1,7 @@
 pub mod api;
 pub mod cli;
 pub mod states;
-#[cfg(feature = "cli")]
+
 use std::sync::Arc;
 
 use anyhow::Context as _;

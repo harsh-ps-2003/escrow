@@ -16,5 +16,6 @@ fedimint-cli = { workspace = true }
 fedimint-core = { workspace = true }
 fedimint-logging = { workspace = true }
 fedimint-escrow-client = { path = "../fedimint-escrow-client" }
+fedimint-testing = { workspace = true }
 tokio = { version = "1.25.0", features = ["full", "tracing"] }
 tracing = "0.1.37"

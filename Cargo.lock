@@ -2139,6 +2139,7 @@ dependencies = [
  "fedimint-core",
  "fedimint-escrow-client",
  "fedimint-logging",
+ "fedimint-testing",
  "tokio",
  "tracing",
 ]

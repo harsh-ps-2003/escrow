@@ -99,3 +99,7 @@ graph TD
     N -->|Seller Claims| O[Seller Claim]
     O -->|Successful| P[Escrow RESOLVED - Seller receives funds]
 ```
+
+## Summer of Bitcoin presentation
+
+A lightening talk was given on the development of this Escrow Module [here](tab:https://bitcointv.com/w/dLn6MrHLQM76HUUPkToUVf).
