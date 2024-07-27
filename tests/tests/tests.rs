@@ -77,7 +77,7 @@ async fn setup_clients() -> anyhow::Result<()> {
         .await?;
     let seller_publickey = seller_pubkey["public_key"].as_str().unwrap();
 
-    let arbiter_pubkey = cmd!("fedimint-cli-arbiter", "module", "escrow", "public-key")
+    let arbiter_pubkey = cmd!(arbiter, "module", "escrow", "public-key")
         .out_json()
         .await?;
     let arbiter_publickey = arbiter_pubkey["public_key"].as_str().unwrap();
