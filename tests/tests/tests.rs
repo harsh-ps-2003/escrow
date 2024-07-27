@@ -11,6 +11,8 @@ use tokio::fs;
 use tokio::sync::OnceCell;
 use tracing::{debug, info};
 
+// The global setup and tracing setup are designed to ensure that the
+// setup_clients function is only run once across all tests
 static GLOBAL_SETUP: OnceCell<(Federation, Client, Client, Client, String, String)> =
     OnceCell::const_new();
 static TRACING_SETUP: OnceCell<()> = OnceCell::const_new();
@@ -23,6 +25,7 @@ async fn setup() -> anyhow::Result<(ProcessManager, TaskGroup)> {
     )
     .await?;
 
+    // tracing should be initialized only once for all tests
     TRACING_SETUP
         .get_or_init(|| async {
             let log_file = fs::OpenOptions::new()
@@ -105,6 +108,7 @@ async fn setup_clients() -> anyhow::Result<(Federation, Client, Client, Client, 
     ))
 }
 
+// clients are setup only once
 async fn get_global_setup() -> &'static (Federation, Client, Client, Client, String, String) {
     GLOBAL_SETUP
         .get_or_init(|| async { setup_clients().await.expect("Failed to setup clients") })
