@@ -2,6 +2,8 @@
 
 The Escrow module of the Fedimint system facilitates secure transactions between a buyer and a seller with the option of involving an arbiter. The process ensures that the buyer can safely transfer funds to the seller for a product or service, with the ability to dispute the transaction if necessary.
 
+It is based on [fedimint-custom-module-template](tab:https://github.com/fedimint/fedimint-custom-modules-example).
+
 ## CLI Commands
 
 ### 1. Create Escrow
@@ -77,10 +79,10 @@ Used by the seller to claim the funds in the escrow when the arbiter decides in 
 
 `fedimint-cli module escrow public-key`
 
-Retrieves the public key associated with the escrow module.
+Retrieves the public key associated with the escrow module client.
 
 
-## Escrow Module Use Flow
+## Escrow Module User Flow
 
 ```mermaid
 graph TD
@@ -100,6 +102,10 @@ graph TD
     O -->|Successful| P[Escrow RESOLVED - Seller receives funds]
 ```
 
+## Tests
+
+The [integration tests](tab:https://github.com/harsh-ps-2003/escrow/blob/main/tests/tests/tests.rs) can be run via `RUST_BACKTRACE=1 ./scripts/tests/starter-test.sh`.
+
 ## Summer of Bitcoin presentation
 
-A lightening talk was given on the development of this Escrow Module [here](tab:https://bitcointv.com/w/dLn6MrHLQM76HUUPkToUVf).
+A lightening talk was given on the development of this Escrow Module [here](tab:https://bitcointv.com/w/dLn6MrHLQM76HUUPkToUVf) using the [slides](tab:https://docs.google.com/presentation/d/1jbj0D3y24wbZSvQ5kA6YBvs_v-j77kPDdM2meuw527I/edit?usp=sharing) and [demo](tab:https://drive.google.com/file/d/1R86Xwe-nbDikaIqXGRfa_IZ2i0q44FSY/view?usp=sharing).
