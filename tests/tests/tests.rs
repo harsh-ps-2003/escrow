@@ -15,9 +15,13 @@ use tracing::{debug, info};
 static TRACING_SETUP: OnceCell<()> = OnceCell::const_new();
 
 async fn setup() -> anyhow::Result<(ProcessManager, TaskGroup)> {
+    let random_suffix: String = (0..8)
+        .map(|_| (b'a' + (rand::random::<u8>() % 26)) as char)
+        .collect();
+
+    let test_dir = format!("{}{}", env::var("FM_TEST_DIR")?, random_suffix);
     let globals = vars::Global::new(
-        // TODO: use random directories.
-        Path::new(&env::var("FM_TEST_DIR")?),
+        Path::new(&test_dir),
         env::var("FM_FED_SIZE")?.parse::<usize>()?,
         0,
     )

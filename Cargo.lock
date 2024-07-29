@@ -2141,6 +2141,7 @@ dependencies = [
  "fedimint-logging",
  "fedimint-testing",
  "once_cell",
+ "rand",
  "tokio",
  "tracing",
 ]
