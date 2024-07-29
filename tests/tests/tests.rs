@@ -2,6 +2,7 @@ use std::env;
 use std::fmt::Write;
 use std::path::Path;
 
+use anyhow::Context;
 use devimint::federation::{Client, Federation};
 use devimint::util::ProcessManager;
 use devimint::{cmd, dev_fed, vars, DevFed};
@@ -11,14 +12,11 @@ use tokio::fs;
 use tokio::sync::OnceCell;
 use tracing::{debug, info};
 
-// The global setup and tracing setup are designed to ensure that the
-// setup_clients function is only run once across all tests
-static GLOBAL_SETUP: OnceCell<(Federation, Client, Client, Client, String, String)> =
-    OnceCell::const_new();
 static TRACING_SETUP: OnceCell<()> = OnceCell::const_new();
 
 async fn setup() -> anyhow::Result<(ProcessManager, TaskGroup)> {
     let globals = vars::Global::new(
+        // TODO: use random directories.
         Path::new(&env::var("FM_TEST_DIR")?),
         env::var("FM_FED_SIZE")?.parse::<usize>()?,
         0,
@@ -61,19 +59,11 @@ async fn setup() -> anyhow::Result<(ProcessManager, TaskGroup)> {
     Ok((process_mgr, task_group))
 }
 
-async fn setup_clients() -> anyhow::Result<(Federation, Client, Client, Client, String, String)> {
+async fn setup_clients() -> anyhow::Result<(DevFed, Client, Client, Client, String, String)> {
     let (process_mgr, _) = setup().await?;
 
-    let DevFed {
-        bitcoind,
-        cln,
-        lnd,
-        fed,
-        gw_cln,
-        gw_lnd,
-        electrs,
-        esplora,
-    } = dev_fed(&process_mgr).await?;
+    let dev_fed = dev_fed(&process_mgr).await?;
+    let fed = &dev_fed.fed;
 
     let buyer = fed.new_joined_client("fedimint-cli-buyer").await?;
     let seller = fed.new_joined_client("fedimint-cli-seller").await?;
@@ -99,7 +89,7 @@ async fn setup_clients() -> anyhow::Result<(Federation, Client, Client, Client, 
     let arbiter_publickey = arbiter_pubkey["public_key"].as_str().unwrap().to_string();
 
     Ok((
-        fed,
+        dev_fed,
         buyer,
         seller,
         arbiter,
@@ -108,16 +98,11 @@ async fn setup_clients() -> anyhow::Result<(Federation, Client, Client, Client, 
     ))
 }
 
-// clients are setup only once
-async fn get_global_setup() -> &'static (Federation, Client, Client, Client, String, String) {
-    GLOBAL_SETUP
-        .get_or_init(|| async { setup_clients().await.expect("Failed to setup clients") })
-        .await
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn happy_path_test() -> anyhow::Result<()> {
-    let (fed, buyer, seller, arbiter, seller_pubkey, arbiter_pubkey) = get_global_setup().await;
+    let (dev_fed, buyer, seller, arbiter, seller_pubkey, arbiter_pubkey) =
+        setup_clients().await.context("failed to setup client")?;
+    let fed = &dev_fed.fed;
 
     // Create escrow by buyer
     let cost = 50_000;
@@ -172,7 +157,9 @@ async fn happy_path_test() -> anyhow::Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn unhappy_path_test() -> anyhow::Result<()> {
-    let (fed, buyer, seller, arbiter, seller_pubkey, arbiter_pubkey) = get_global_setup().await;
+    let (dev_fed, buyer, seller, arbiter, seller_pubkey, arbiter_pubkey) =
+        setup_clients().await.context("failed to setup client")?;
+    let fed = &dev_fed.fed;
 
     // Create escrow
     let cost = 100_000;
