@@ -5,4 +5,4 @@ set -euo pipefail
 export RUST_LOG="${RUST_LOG:-info}"
 source ./scripts/build.sh
 
-cargo test -p fedimint-starter-tests
+cargo test -p fedimint-starter-tests -- --test-threads 1
