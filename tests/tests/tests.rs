@@ -15,11 +15,12 @@ use tracing::{debug, info};
 static TRACING_SETUP: OnceCell<()> = OnceCell::const_new();
 
 async fn setup() -> anyhow::Result<(ProcessManager, TaskGroup)> {
-    let random_suffix: String = (0..8)
+    let random_suffix_dir: String = (0..8)
         .map(|_| (b'a' + (rand::random::<u8>() % 26)) as char)
         .collect();
 
-    let test_dir = format!("{}{}", env::var("FM_TEST_DIR")?, random_suffix);
+    let test_dir = format!("{}{}", env::var("FM_TEST_DIR")?, random_suffix_dir);
+    fs::create_dir_all(&test_dir);
     let globals = vars::Global::new(
         Path::new(&test_dir),
         env::var("FM_FED_SIZE")?.parse::<usize>()?,
@@ -27,7 +28,8 @@ async fn setup() -> anyhow::Result<(ProcessManager, TaskGroup)> {
     )
     .await?;
 
-    // tracing should be initialized only once for all tests
+    // a global default trace dispatcher should be initialized only once for all
+    // tests
     TRACING_SETUP
         .get_or_init(|| async {
             let log_file = fs::OpenOptions::new()
@@ -69,9 +71,20 @@ async fn setup_clients() -> anyhow::Result<(DevFed, Client, Client, Client, Stri
     let dev_fed = dev_fed(&process_mgr).await?;
     let fed = &dev_fed.fed;
 
-    let buyer = fed.new_joined_client("fedimint-cli-buyer").await?;
-    let seller = fed.new_joined_client("fedimint-cli-seller").await?;
-    let arbiter = fed.new_joined_client("fedimint-cli-arbiter").await?;
+    // everytime a unique set of client is setup
+    let random_suffix_client: String = (0..8)
+        .map(|_| (b'a' + (rand::random::<u8>() % 26)) as char)
+        .collect();
+
+    let buyer = fed
+        .new_joined_client(&format!("fedimint-cli-buyer-{}", random_suffix_client))
+        .await?;
+    let seller = fed
+        .new_joined_client(&format!("fedimint-cli-seller-{}", random_suffix_client))
+        .await?;
+    let arbiter = fed
+        .new_joined_client(&format!("fedimint-cli-arbiter-{}", random_suffix_client))
+        .await?;
 
     let initial_balance_sats = 100_000;
     fed.pegin_client(initial_balance_sats, &buyer).await?;
