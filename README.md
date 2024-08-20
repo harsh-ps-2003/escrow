@@ -108,4 +108,4 @@ The [integration tests](tab:https://github.com/harsh-ps-2003/escrow/blob/main/te
 
 ## Summer of Bitcoin presentation
 
-A lightening talk was given on the development of this Escrow Module [here](tab:https://bitcointv.com/w/dLn6MrHLQM76HUUPkToUVf) using the [slides](tab:https://docs.google.com/presentation/d/1jbj0D3y24wbZSvQ5kA6YBvs_v-j77kPDdM2meuw527I/edit?usp=sharing) and [demo](tab:https://drive.google.com/file/d/1R86Xwe-nbDikaIqXGRfa_IZ2i0q44FSY/view?usp=sharing).
+A lightening talk was given on the development of this Escrow Module [here](https://bitcointv.com/w/dLn6MrHLQM76HUUPkToUVf) using the [slides](https://docs.google.com/presentation/d/1jbj0D3y24wbZSvQ5kA6YBvs_v-j77kPDdM2meuw527I/edit?usp=sharing) and [demo](https://drive.google.com/file/d/1R86Xwe-nbDikaIqXGRfa_IZ2i0q44FSY/view?usp=sharing).
